@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import inspect
+import os
+import threading
+import time
 import traceback
 from typing import Any
 
@@ -20,7 +23,18 @@ def _encode(value: Any, limit: int) -> bytes:
 def worker_main(
     endpoint: str, identity: bytes, definition: bytes,
     source: bool, rank: int, replicas: int, payload_limit: int,
+    machine: str = "local", local_rank: int | None = None,
+    local_replicas: int | None = None,
+    parent_pid: int | None = None,
 ) -> None:
+    if parent_pid is not None:
+        def watch_parent() -> None:
+            while True:
+                if os.getppid() != parent_pid:
+                    os._exit(143)
+                time.sleep(0.1)
+
+        threading.Thread(target=watch_parent, name="zjobs-agent-watch", daemon=True).start()
     context = zmq.Context()
     socket = context.socket(zmq.DEALER)
     socket.setsockopt(zmq.IDENTITY, identity)
@@ -45,7 +59,11 @@ def worker_main(
             if command == b"next" and source:
                 operation = "source iteration"
                 if iterator is None:
-                    iterator = iter(task(SourceContext(rank, replicas)))
+                    iterator = iter(task(SourceContext(
+                        rank, replicas, machine,
+                        rank if local_rank is None else local_rank,
+                        replicas if local_replicas is None else local_replicas,
+                    )))
                 try:
                     value = next(iterator)
                 except StopIteration:
