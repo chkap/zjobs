@@ -77,6 +77,13 @@ def worker(endpoint, definition, source_context, limit, kind):
         socket.send_multipart([json.dumps({
             "kind": "error", "token": token, "error": traceback.format_exc()[-8000:],
         }).encode()])
+        # Keep the queued error alive until the local owner observes it and
+        # shuts us down; LINGER=0 must not discard an initialization failure.
+        while parent is None or parent.is_alive():
+            if socket.poll(100):
+                message = socket.recv_multipart()
+                if json.loads(message[0])["kind"] == "stop":
+                    break
     finally:
         stopped.set()
         socket.close()

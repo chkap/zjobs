@@ -460,6 +460,30 @@ def test_duplicate_worker_result_cannot_complete_a_new_attempt(monkeypatch):
     clean(run)
 
 
+@pytest.mark.parametrize("failure", ["initialization", "task", "stall"])
+def test_stateful_worker_errors_and_stalls_fail_with_stage_context(failure):
+    class Task:
+        def __init__(self):
+            if failure == "initialization":
+                raise ValueError("resource initialization failed")
+        def __call__(self, value):
+            if failure == "task":
+                raise ValueError("processing failed")
+            time.sleep(5)
+            return value
+    graph = Graph()
+    root = graph.source("raw", lambda ctx: [1])
+    graph.map("stateful", Task, inputs=[root])
+    message = {"initialization": "initialization failed", "task": "processing failed",
+               "stall": "stalled; retries exhausted"}[failure]
+    with pytest.raises(RunError, match=message):
+        with graph.run(limits=Limits(task_timeout=.7)) as run:
+            list(run)
+    assert "stateful/0" in run.status["error"]
+    assert not run.status["iteration_done"]
+    clean(run)
+
+
 def test_abandoned_shutdown_context_has_its_own_deadline():
     # One successful local iterator staying open cannot make the other peer's
     # close report success without its BYE. Use a separate full peer application.
