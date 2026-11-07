@@ -114,7 +114,12 @@ opportunity within P*(L+1) admissions at that receiver rank, **assuming unchange
 eligibility, sufficient byte/worker capacity and no raced/rejected claims**.
 Rejections rotate owners and reschedule; they are not successful admissions.
 Owner-side arbitration also rotates pending claimants with a finite local
-streak. There is no unconditional wall-time or per-owner successful-grant bound
+streak. Local requests enter each arbitration round before queued peer requests
+are granted; no distinguished remote queue runs ahead of local scheduling.
+Peer/rank candidate cursors spread requests across ready items to avoid every
+receiver racing the oldest snapshot candidate. This is not static partitioning:
+all eligible replicas still compete, and rejection rotates/reschedules.
+There is no unconditional wall-time or per-owner successful-grant bound
 under competing requests, slow workers, changing offers or backpressure.
 `balanced` uses round-robin ready owners that fit available capacity; no numeric
 rank/machine preference. `local_only` never requests peer payloads. Requiring all
@@ -173,7 +178,7 @@ the replacement attempt. Repeated Python effects are possible. There is no
 exactly-once external side-effect guarantee, durable replay or active-run restart.
 
 `PeerConfig(identity="local", run_id="standalone", listen=None, peers={},
-join_timeout=15, heartbeat_timeout=5, lease_timeout=5)` configures the run.
+join_timeout=15, heartbeat_timeout=5, lease_timeout=5, claim_timeout=5)` configures the run.
 For peers, the map includes **all** members, including self with its listen
 endpoint. Different local replica counts are valid. Incarnation replacement,
 incompatible membership/graph, missing peers, peer loss, stalled/crashed
@@ -181,6 +186,9 @@ non-replayable sources, task exceptions, exhausted retries, oversized results,
 expired leases and congested required-message queues explicitly fail the run.
 Lease expiry fails instead of silently reissuing already committed work.
 Renewals continue for active input/batch claims even under consumer backpressure.
+Pending claims have an independent `claim_timeout` for receiving grant/reject;
+heartbeats and safe lease renewals cannot extend a missing response forever.
+Duplicate live claim tokens are ignored without retransferring the payload.
 Peer failure gossip is best effort; each survivor independently detects missing
 heartbeats. A partition does not produce success-shaped completion.
 
@@ -209,6 +217,75 @@ Local children monitor parent loss; Linux additionally sets a parent-death
 signal so abrupt peer/application death does not leave its workers running.
 
 ## Validation and next delivery gates
+
+### Diagnostics and application overlap
+
+`Graph.describe(peer=...)` gives the local launch plan without launching or
+contacting peers: stage counts, effective rank policies, inputs, membership and
+fingerprint. It is not a global scheduler. `Run.status.stages[name].buffers`
+separates actual retained payloads, maximum-size result reservations, received
+claims, pending transfer reservations and grouped batch bytes/items.
+`buffer_peaks` retains their individual peaks, while `peak_retained_bytes`
+includes simultaneous actual + result reservations and `peak_claim_bytes`
+includes received + pending claims. Individual peaks need not occur together;
+do not add them and report the sum as an observed memory peak. Iterator frames
+reference retained snapshots, so those two accounting scopes are not additive
+unique allocations. Transport multipart/envelope/decoded memory caveats above
+still apply.
+
+Per-stage `execution` reports started/completed attempts, peak commanded
+in-flight workers, accumulated **worker-measured** task wall/CPU time and first/
+last monotonic timestamps. Wall time includes decode, user work and result
+serialization, not worker initialization or socket send wait. CPU is the worker's
+process CPU clock. Crashed attempts cannot report their lost execution time;
+started counts include retries, completed counts do not invent those samples.
+`peak_in_flight` is command capacity, not a claim of continuous CPU utilization.
+Owner `claims_granted`/`claims_rejected` counts are by child and requester, while
+local/peer traffic measures successful receiver admissions.
+
+```sh
+.venv/bin/python examples/measure_peer_graph.py
+```
+
+This runs a real timed source -> CPU preprocessing -> transform -> collection -> local
+consumer workload with 64 KiB byte payloads. JSON includes actual distinct PIDs,
+accounted buffer peaks, traffic, worker CPU/wall time, execution window and
+summed worker wall/window ratio. A ratio above one proves overlapping reported
+worker intervals, not a universal speedup. Linux maxrss is in KiB; parent peak
+and **largest child** peak are separately reported, not summed as simultaneous
+total process RSS.
+
+Launch the same measurement entrypoint independently on A/B/C:
+
+```sh
+PEERS='{"A":"tcp://127.0.0.1:5580","B":"tcp://127.0.0.1:5581","C":"tcp://127.0.0.1:5582"}'
+.venv/bin/python examples/measure_peer_graph.py --identity A --peers "$PEERS" --run-id measure-1 --io-workers 2 --source-delay .005 --cpu-workers 1 --cpu-seconds .03 --transform-delay .002
+.venv/bin/python examples/measure_peer_graph.py --identity B --peers "$PEERS" --run-id measure-1 --io-workers 1 --source-delay .03 --cpu-workers 2 --cpu-seconds .01 --transform-delay .04
+.venv/bin/python examples/measure_peer_graph.py --identity C --peers "$PEERS" --run-id measure-1 --io-workers 1 --source-delay .05 --cpu-workers 2 --cpu-seconds .005 --transform-delay .01
+```
+
+Run the three commands in separate terminals. Expect 64 unique coordinates in
+the union of local consumers, every payload length 65536; worker distribution
+is local and timing/consumer ownership are nondeterministic. Repeat with
+`--locality local_only` and a new run ID/ports for application-level comparison.
+Synthetic delays model asymmetric readiness, not real disk throughput; practical
+file IO and optional torch examples remain separate delivery work.
+
+For an **8 machines x 8 IO ranks** configuration demonstration without pretending
+to launch 64 concurrent workers or requiring eight physical hosts:
+
+```sh
+PEERS='{"A":"tcp://127.0.0.1:5590","B":"tcp://127.0.0.1:5591","C":"tcp://127.0.0.1:5592","D":"tcp://127.0.0.1:5593","E":"tcp://127.0.0.1:5594","F":"tcp://127.0.0.1:5595","G":"tcp://127.0.0.1:5596","H":"tcp://127.0.0.1:5597"}'
+for PEER in A B C D E F G H; do
+    .venv/bin/python examples/measure_peer_graph.py --identity "$PEER" --peers "$PEERS" --io-workers 8 --plan-only
+done
+```
+
+Each independent plan reports eight local source replicas (64 across eight
+plans), one transform, plus separately configurable CPU/collection counts. `--plan-only` starts
+no workers or network service. The actual A/B/C resource-bounded launch above
+checks the same configuration/API path without claiming physical eight-host
+execution.
 
 `tests/test_peer_graph.py` covers standalone streaming, independent peer launches,
 accounting, policies, branches/union, batches, multipart isolation, retries,

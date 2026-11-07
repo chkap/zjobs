@@ -61,6 +61,7 @@ class PeerConfig:
     join_timeout: float = 15
     heartbeat_timeout: float = 5
     lease_timeout: float = 5
+    claim_timeout: float = 5
 
     def __post_init__(self):
         if not self.identity or not self.run_id:
@@ -72,7 +73,7 @@ class PeerConfig:
             raise ValueError("peer endpoints must be distinct")
         if any(not k or not v.startswith("tcp://") for k, v in members.items()):
             raise ValueError("peers require nonempty identities and tcp:// endpoints")
-        for name in ("join_timeout", "heartbeat_timeout", "lease_timeout"):
+        for name in ("join_timeout", "heartbeat_timeout", "lease_timeout", "claim_timeout"):
             value = getattr(self, name)
             if not math.isfinite(value) or value <= 0:
                 raise ValueError(f"{name} must be finite and positive")
@@ -157,6 +158,25 @@ class Graph:
         shape = [(s.name, s.kind, [p.name for p in s.inputs], s.size, s.max_bytes)
                  for s in self.stages]
         return hashlib.sha256(json.dumps(shape, sort_keys=True).encode()).hexdigest()
+
+    def describe(self, *, peer: PeerConfig | None = None) -> dict[str, Any]:
+        """Describe this machine's launch configuration without starting workers."""
+        config = peer or PeerConfig()
+        return {
+            "peer": config.identity, "members": sorted(config.peers) or [config.identity],
+            "fingerprint": self.fingerprint(),
+            "local_worker_count": sum(s.replicas for s in self.stages),
+            "stages": {
+                s.name: {
+                    "kind": s.kind, "replicas": s.replicas,
+                    "inputs": [p.name for p in s.inputs],
+                    "policies": [
+                        {"mode": self.policy(s, r).mode,
+                         "max_local_streak": self.policy(s, r).max_local_streak}
+                        for r in range(s.replicas)],
+                } for s in self.stages
+            },
+        }
 
     def run(self, *, peer: PeerConfig | None = None, limits: Limits | None = None):
         from .runtime import Run
