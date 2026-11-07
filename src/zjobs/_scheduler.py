@@ -46,6 +46,7 @@ class Replica:
     attempt: int = 0
     restarts: int = 0
     retrying: bool = False
+    members: list[Output] = field(default_factory=list)
 
 
 def choose(
@@ -84,6 +85,8 @@ def coordinate(run: Run, transport: zmq.Socket | RemoteTransport) -> None:
     completed_work = produced.copy()
     peak_queued = produced.copy()
     peak_queue_bytes = produced.copy()
+    peak_group_items = produced.copy()
+    peak_group_bytes = produced.copy()
     created = settled = sequence = work = 0
     last_progress = time.monotonic()
     blocked_since: float | None = None
@@ -325,7 +328,7 @@ def coordinate(run: Run, transport: zmq.Socket | RemoteTransport) -> None:
                     complete[index] = all(r.state == "done" for r in group)
                 elif (
                     all(complete[indices[parent]] for parent in node.inputs)
-                    and not pending[index] and all(r.state == "ready" for r in group)
+                    and not pending[index] and all(r.state == "ready" and not r.members for r in group)
                 ):
                     complete[index] = True
             def dispatch_priority(identity: bytes) -> int:
@@ -358,10 +361,10 @@ def coordinate(run: Run, transport: zmq.Socket | RemoteTransport) -> None:
                     continue
                 if replica.state != "ready" or complete[replica.stage]:
                     continue
-                # A producer has one retained-output credit until all of its
-                # branches settle. Fast sources cannot exhaust a host with an
-                # unbounded sequence while downstream ranks are initializing.
-                if not replica.retrying and any(output.producer == identity for output in outputs.values()):
+                # Batch inputs need multiple retained outputs per producer to
+                # assemble a group; other paths keep one producer output credit.
+                feeds_batch = any(nodes[index].batch_size for index in downstream[replica.stage])
+                if not replica.retrying and not feeds_batch and any(output.producer == identity for output in outputs.values()):
                     continue
                 if not replica.retrying and (
                     used_items[p.machine] >= run._retained_items
@@ -369,28 +372,80 @@ def coordinate(run: Run, transport: zmq.Socket | RemoteTransport) -> None:
                 ):
                     continue
                 if nodes[replica.stage].inputs:
+                    node = nodes[replica.stage]
+                    if node.batch_size and not replica.retrying:
+                        while len(replica.members) < node.batch_size:
+                            candidate = choose(
+                                pending[replica.stage], p.machine, p.policy,
+                                replica.local_streak, run._remote_after,
+                            )
+                            if candidate is None:
+                                break
+                            if candidate.size > node.batch_bytes:
+                                raise RunError(f"{label(replica)}: member exceeds batch max_bytes {node.batch_bytes}")
+                            if sum(member.size for member in replica.members) + candidate.size > node.batch_bytes:
+                                break
+                            pending[replica.stage].remove(candidate)
+                            replica.members.append(candidate)
+                            peak_group_items[node.name] = max(
+                                peak_group_items[node.name],
+                                sum(len(r.members) for r in replicas.values() if r.stage == replica.stage),
+                            )
+                            peak_group_bytes[node.name] = max(
+                                peak_group_bytes[node.name],
+                                sum(member.size for r in replicas.values() if r.stage == replica.stage for member in r.members),
+                            )
+                            replica.local_streak = replica.local_streak + 1 if candidate.owner == p.machine else 0
+                            progress = True
+                        if not replica.members:
+                            continue
+                        next_item = choose(pending[replica.stage], p.machine, p.policy,
+                                           replica.local_streak, run._remote_after)
+                        group_bytes = sum(member.size for member in replica.members)
+                        byte_full = group_bytes >= node.batch_bytes or (
+                            next_item is not None and group_bytes + next_item.size > node.batch_bytes
+                        )
+                        parents_done = all(complete[indices[parent]] for parent in node.inputs)
+                        if len(replica.members) < node.batch_size and not byte_full and not parents_done:
+                            continue
+                        replica.input = replica.members[0]
+                        replica.attempt = 0
                     item = replica.input if replica.retrying else choose(
                         pending[replica.stage], p.machine, p.policy, replica.local_streak, run._remote_after,
                     )
+                    if node.batch_size:
+                        item = replica.members[0]
                     if item is None:
                         continue
-                    if not replica.retrying:
+                    if not replica.retrying and not node.batch_size:
                         pending[replica.stage].remove(item)
                         replica.attempt = 0
                     replica.input = item
-                    if isinstance(transport, RemoteTransport):
+                    if node.batch_size:
+                        if isinstance(transport, RemoteTransport):
+                            payload = encode({"members": [
+                                {"owner": member.owner, "output": member.key} for member in replica.members
+                            ]})
+                        else:
+                            payload = b""
+                    elif isinstance(transport, RemoteTransport):
                         payload = encode({"owner": item.owner, "output": item.key})
                     else:
                         payload = local_payloads[item.key]
                     is_local = item.owner == p.machine
-                    replica.local_streak = replica.local_streak + 1 if is_local else 0
+                    if not node.batch_size and not replica.retrying:
+                        replica.local_streak = replica.local_streak + 1 if is_local else 0
                     recent_assignments.append({
                         "output": item.key, "stage": p.stage, "rank": p.rank,
                         "owner": item.owner, "consumer": p.machine, "policy": p.policy,
                         "local": is_local, "local_streak": replica.local_streak,
                         "attempt": replica.attempt, "generation": replica.generation,
+                        "members": [
+                            {"output": member.key, "owner": member.owner}
+                            for member in replica.members[:32]
+                        ],
                     })
-                    command = b"task"
+                    command = b"batch" if node.batch_size else b"task"
                 else:
                     command, payload = b"next", b""
                 if not replica.retrying:
@@ -404,7 +459,12 @@ def coordinate(run: Run, transport: zmq.Socket | RemoteTransport) -> None:
                     work += 1
                 with run._lock:
                     run._stats["attempts"] += 1
-                transport.send_multipart([identity, command, payload])
+                if command == b"batch" and isinstance(transport, zmq.Socket):
+                    transport.send_multipart([identity, command, *[
+                        local_payloads[member.key] for member in replica.members
+                    ]])
+                else:
+                    transport.send_multipart([identity, command, payload])
                 replica.state = "busy"
                 replica.since = time.monotonic()
                 progress = True
@@ -446,11 +506,14 @@ def coordinate(run: Run, transport: zmq.Socket | RemoteTransport) -> None:
                         transport.accept(owner, key)
                     used_bytes[owner] -= run._payload_limit - size
                     if replica.input is not None:
-                        with run._lock:
-                            kind = "local" if replica.input.owner == replica.placement.machine else "remote"
-                            run._stats[f"{kind}_items"] += 1
-                            run._stats[f"{kind}_bytes"] += replica.input.size
-                        settle(replica.input, replica.stage)
+                        members = replica.members or [replica.input]
+                        for member in members:
+                            with run._lock:
+                                kind = "local" if member.owner == replica.placement.machine else "remote"
+                                run._stats[f"{kind}_items"] += 1
+                                run._stats[f"{kind}_bytes"] += member.size
+                            settle(member, replica.stage)
+                        replica.members.clear()
                         replica.input = None
                     edges = set(downstream[replica.stage]) or {-1}
                     output = Output(key, owner, size, identity, edges)
@@ -469,6 +532,14 @@ def coordinate(run: Run, transport: zmq.Socket | RemoteTransport) -> None:
                 for index, node in enumerate(nodes):
                     peak_queued[node.name] = max(peak_queued[node.name], len(pending[index]))
                     peak_queue_bytes[node.name] = max(peak_queue_bytes[node.name], sum(item.size for item in pending[index]))
+                    peak_group_items[node.name] = max(
+                        peak_group_items[node.name],
+                        sum(len(r.members) for r in replicas.values() if r.stage == index),
+                    )
+                    peak_group_bytes[node.name] = max(
+                        peak_group_bytes[node.name],
+                        sum(member.size for r in replicas.values() if r.stage == index for member in r.members),
+                    )
                 run._stats.update(
                     produced=produced.copy(), completed_work=completed_work.copy(),
                     queued={node.name: len(pending[i]) for i, node in enumerate(nodes)},
@@ -487,9 +558,16 @@ def coordinate(run: Run, transport: zmq.Socket | RemoteTransport) -> None:
                         {"stage": r.placement.stage, "rank": r.placement.rank,
                          "machine": r.placement.machine, "work": r.work,
                          "logical": r.input.key if r.input is not None else None,
+                         "members": [member.key for member in r.members[:32]],
                          "attempt": r.attempt, "generation": r.generation, "state": r.state}
                         for r in replicas.values() if r.state in ("starting", "busy")
                     ][:32],
+                    grouping_items={nodes[i].name: sum(len(r.members) for r in replicas.values() if r.stage == i)
+                                    for i in range(len(nodes)) if nodes[i].batch_size},
+                    grouping_bytes={nodes[i].name: sum(member.size for r in replicas.values() if r.stage == i for member in r.members)
+                                    for i in range(len(nodes)) if nodes[i].batch_size},
+                    peak_grouping_items={node.name: peak_group_items[node.name] for node in nodes if node.batch_size},
+                    peak_grouping_bytes={node.name: peak_group_bytes[node.name] for node in nodes if node.batch_size},
                     peak_output_buffered=max(run._stats["peak_output_buffered"], run._outputs.qsize() + final_reserved),
                     peak_output_bytes=max(run._stats["peak_output_bytes"], buffered),
                 )

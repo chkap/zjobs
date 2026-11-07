@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Callable, Iterable, Iterator, Mapping
 
 if TYPE_CHECKING:
@@ -40,6 +40,8 @@ class Node:
     placement: tuple[tuple[str, int], ...] = ()
     policy: str | None = None
     rank_policies: tuple[tuple[int, str], ...] = ()
+    batch_size: int = 0
+    batch_bytes: int = 0
 
 
 @dataclass(frozen=True)
@@ -59,6 +61,10 @@ POLICIES = frozenset(("local_first", "balanced", "local_only"))
 def validate_policy(policy: str) -> None:
     if not isinstance(policy, str) or policy not in POLICIES:
         raise ValueError(f"unknown locality policy {policy!r}; choose local_first, balanced or local_only")
+
+
+def _batch_list(members: list[Any]) -> list[Any]:
+    return members
 
 
 class Graph:
@@ -96,6 +102,22 @@ class Graph:
         if any(parent not in self._nodes for parent in parents):
             raise ValueError("inputs must be existing nodes of this graph")
         return self._add(name, task, replicas, parents, placement, policy, rank_policies)
+
+    def batch(
+        self, name: str, *, inputs: Iterable[Node], size: int,
+        max_bytes: int = 32 * 1024 * 1024, replicas: int = 1,
+        placement: Mapping[str, int] | None = None, policy: str | None = None,
+        rank_policies: Mapping[int, str] | None = None,
+    ) -> Node:
+        """Collect retained members into unordered lists inside the graph."""
+        for setting, value in (("size", size), ("max_bytes", max_bytes)):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValueError(f"batch {setting} must be a positive integer")
+        node = self.map(name, _batch_list, inputs=inputs, replicas=replicas, placement=placement,
+                        policy=policy, rank_policies=rank_policies)
+        batch = replace(node, batch_size=size, batch_bytes=max_bytes)
+        self._nodes[-1] = batch
+        return batch
 
     def _add(
         self, name: str, task: Callable[..., Any], replicas: int, inputs: tuple[Node, ...],

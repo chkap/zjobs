@@ -60,6 +60,8 @@ def serve(
             sequence = 0
             peers: dict[str, zmq.Socket] = {}
             fetching: dict[bytes, str] = {}
+            groups: dict[bytes, list[dict]] = {}
+            group_payloads: dict[bytes, list[bytes]] = {}
             byte_limit = 0
             item_limit = 0
             payload_limit = 0
@@ -86,6 +88,8 @@ def serve(
                 payload_workers.clear()
                 accepted.clear()
                 fetching.clear()
+                groups.clear()
+                group_payloads.clear()
                 retired.clear()
                 retained_size = 0
                 peak_retained_size = peak_retained_items = 0
@@ -102,6 +106,25 @@ def serve(
                 "event": "ready", "machine": machine, "endpoint": advertise,
                 **capabilities(), "lease_timeout": lease_timeout,
             }).decode(), flush=True)
+
+            def deliver_group(identity: bytes) -> None:
+                while groups[identity]:
+                    reference = groups[identity][0]
+                    if reference["owner"] != machine:
+                        fetching[identity] = reference["output"]
+                        peers[reference["owner"]].send_multipart([encode({
+                            "type": "fetch", "run": run, "output": reference["output"],
+                            "worker": identity.decode(),
+                        })])
+                        return
+                    payload = payloads[reference["output"]]
+                    transfers["local_items"] += 1
+                    transfers["local_bytes"] += len(payload)
+                    group_payloads[identity].append(payload)
+                    groups[identity].pop(0)
+                workers.send_multipart([identity, b"batch", *group_payloads.pop(identity)])
+                groups.pop(identity)
+
             try:
                 while not stopping:
                     now = time.monotonic()
@@ -191,7 +214,11 @@ def serve(
                                 identity = message["worker"].encode("ascii")
                                 if identity not in group or len(frames) != 4:
                                     raise ValueError("unknown worker or invalid command frames")
-                                if frames[2] == b"task":
+                                if frames[2] == b"batch":
+                                    groups[identity] = decode(frames[3])["members"]
+                                    group_payloads[identity] = []
+                                    deliver_group(identity)
+                                elif frames[2] == b"task":
                                     reference = decode(frames[3])
                                     if reference["owner"] == machine:
                                         payload = payloads[reference["output"]]
@@ -227,6 +254,8 @@ def serve(
                                         retained_size -= len(payloads.pop(output))
                                         payload_workers.pop(output)
                                 fetching.pop(old, None)
+                                groups.pop(old, None)
+                                group_payloads.pop(old, None)
                                 try:
                                     workers.send_multipart([old, b"stop", b""], zmq.DONTWAIT)
                                 except zmq.ZMQError:
@@ -325,7 +354,12 @@ def serve(
                             payload = frames[1]
                             transfers["remote_items"] += 1
                             transfers["remote_bytes"] += len(payload)
-                            workers.send_multipart([identity, b"task", payload])
+                            if identity in groups:
+                                group_payloads[identity].append(payload)
+                                groups[identity].pop(0)
+                                deliver_group(identity)
+                            else:
+                                workers.send_multipart([identity, b"task", payload])
                         except (ValueError, zmq.ZMQError) as exc:
                             if owner is not None:
                                 send(owner, {"type": "error", "run": run, "error": str(exc)})
