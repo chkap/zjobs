@@ -8,7 +8,7 @@ import time
 import cloudpickle
 import zmq
 
-VERSION = 1
+VERSION = 2
 
 
 def capabilities() -> dict:
@@ -16,7 +16,7 @@ def capabilities() -> dict:
         "protocol": VERSION,
         "python": list(sys.version_info[:2]),
         "cloudpickle": cloudpickle.__version__,
-        "transport": "central-payload-v1",
+        "transport": "host-owned-v2",
     }
 
 

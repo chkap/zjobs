@@ -54,12 +54,23 @@ def serve(
             last_seen = 0.0
             last_heartbeat = 0.0
             group: dict[bytes, _Worker] = {}
+            payloads: dict[str, bytes] = {}
+            sequence = 0
+            peers: dict[str, zmq.Socket] = {}
+            fetching: dict[bytes, str] = {}
+            byte_limit = 0
+            item_limit = 0
+            retained_size = 0
+            peak_retained_size = 0
+            peak_retained_items = 0
+            transfers = {"local_items": 0, "local_bytes": 0, "remote_items": 0, "remote_bytes": 0,
+                         "served_remote_bytes": 0, "final_bytes": 0}
 
             def send(recipient: bytes, message: dict, *frames: bytes) -> None:
                 control.send_multipart([recipient, encode(message), *frames])
 
             def cleanup() -> None:
-                nonlocal owner, run, group
+                nonlocal owner, run, group, retained_size, transfers, peak_retained_size, peak_retained_items
                 for identity in group:
                     try:
                         workers.send_multipart([identity, b"stop", b""], zmq.DONTWAIT)
@@ -67,6 +78,15 @@ def serve(
                         pass
                 stop_processes([worker.process for worker in group.values()])
                 group = {}
+                payloads.clear()
+                fetching.clear()
+                retained_size = 0
+                peak_retained_size = peak_retained_items = 0
+                for peer in peers.values():
+                    poller.unregister(peer)
+                    peer.close()
+                peers.clear()
+                transfers = {key: 0 for key in transfers}
                 owner = None
                 run = None
                 # Old run identities include a UUID and are never reused.
@@ -108,6 +128,16 @@ def serve(
                                 if len(frames) != 2 + len(specs):
                                     raise ValueError("worker definition count does not match placement")
                                 owner, run = recipient, message["run"]
+                                byte_limit = message["retained_bytes"]
+                                item_limit = message["retained_items"]
+                                for peer_machine, endpoint in message["peers"].items():
+                                    if peer_machine == machine:
+                                        continue
+                                    peer = context.socket(zmq.DEALER)
+                                    configure(peer)
+                                    peer.connect(endpoint)
+                                    peers[peer_machine] = peer
+                                    poller.register(peer, zmq.POLLIN)
                                 last_seen = time.monotonic()
                                 spawn = mp.get_context("spawn")
                                 for spec, definition in zip(specs, frames[2:]):
@@ -135,6 +165,15 @@ def serve(
                                     "type": "started", "run": run,
                                     "pids": {key.decode(): value.process.pid for key, value in group.items()},
                                 })
+                            elif kind == "fetch":
+                                if message["run"] != run or message["output"] not in payloads:
+                                    raise ValueError("requested payload is not available in this run")
+                                payload = payloads[message["output"]]
+                                transfers["served_remote_bytes"] += len(payload)
+                                send(recipient, {
+                                    "type": "fetched", "run": run, "worker": message["worker"],
+                                    "output": message["output"],
+                                }, payload)
                             elif recipient != owner or message.get("run") != run:
                                 raise ValueError("command does not own this agent run")
                             elif kind == "heartbeat":
@@ -144,11 +183,40 @@ def serve(
                                 identity = message["worker"].encode("ascii")
                                 if identity not in group or len(frames) != 4:
                                     raise ValueError("unknown worker or invalid command frames")
-                                workers.send_multipart([identity, frames[2], frames[3]])
+                                if frames[2] == b"task":
+                                    reference = decode(frames[3])
+                                    if reference["owner"] == machine:
+                                        payload = payloads[reference["output"]]
+                                        transfers["local_items"] += 1
+                                        transfers["local_bytes"] += len(payload)
+                                        workers.send_multipart([identity, b"task", payload])
+                                    else:
+                                        fetching[identity] = reference["output"]
+                                        peers[reference["owner"]].send_multipart([encode({
+                                            "type": "fetch", "run": run,
+                                            "output": reference["output"], "worker": identity.decode(),
+                                        })])
+                                else:
+                                    workers.send_multipart([identity, frames[2], frames[3]])
+                            elif kind == "release":
+                                payload = payloads.pop(message["output"])
+                                retained_size -= len(payload)
+                            elif kind == "final":
+                                payload = payloads[message["output"]]
+                                transfers["final_bytes"] += len(payload)
+                                send(recipient, {
+                                    "type": "final", "run": run, "output": message["output"],
+                                }, payload)
                             elif kind == "stop":
                                 stopped_run = run
+                                final_transfers = transfers.copy()
+                                peak_bytes, peak_items = peak_retained_size, peak_retained_items
                                 cleanup()
-                                send(recipient, {"type": "stopped", "run": stopped_run})
+                                send(recipient, {
+                                    "type": "stopped", "run": stopped_run,
+                                    "transfers": final_transfers, "retained_items": 0, "retained_bytes": 0,
+                                    "peak_retained_bytes": peak_bytes, "peak_retained_items": peak_items,
+                                })
                             else:
                                 raise ValueError(f"unknown agent command {kind!r}")
                         except (ValueError, KeyError, TypeError, RuntimeError, OSError, zmq.ZMQError) as exc:
@@ -165,18 +233,61 @@ def serve(
                         identity, kind, payload = workers.recv_multipart()
                         if identity in group and owner is not None:
                             try:
+                                if kind == b"item":
+                                    if len(payloads) >= item_limit or retained_size + len(payload) > byte_limit:
+                                        raise RuntimeError("agent retained payload capacity exceeded")
+                                    sequence += 1
+                                    output = f"{run}:{machine}:{sequence}"
+                                    payloads[output] = payload
+                                    retained_size += len(payload)
+                                    peak_retained_size = max(peak_retained_size, retained_size)
+                                    peak_retained_items = max(peak_retained_items, len(payloads))
+                                    payload = encode({
+                                        "output": output, "owner": machine, "size": len(payload),
+                                    })
                                 send(owner, {
                                     "type": "worker", "run": run, "worker": identity.decode(),
                                 }, kind, payload)
+                            except RuntimeError as exc:
+                                print(f"agent {machine}: payload accounting failure: {exc}",
+                                      file=sys.stderr, flush=True)
+                                send(owner, {"type": "error", "run": run, "error": str(exc)})
+                                cleanup()
                             except zmq.ZMQError as exc:
                                 print(f"agent {machine}: controller disconnected: {exc}",
                                       file=sys.stderr, flush=True)
                                 cleanup()
+                    for peer_machine, peer in peers.copy().items():
+                        if peer not in events:
+                            continue
+                        frames = peer.recv_multipart()
+                        try:
+                            message = decode(frames[0])
+                            identity = message.get("worker", "").encode("ascii")
+                            if (
+                                message.get("type") != "fetched" or message.get("run") != run
+                                or fetching.get(identity) != message.get("output") or len(frames) != 2
+                            ):
+                                raise ValueError(f"invalid/missing payload from agent {peer_machine}")
+                            fetching.pop(identity)
+                            payload = frames[1]
+                            transfers["remote_items"] += 1
+                            transfers["remote_bytes"] += len(payload)
+                            workers.send_multipart([identity, b"task", payload])
+                        except (ValueError, zmq.ZMQError) as exc:
+                            if owner is not None:
+                                send(owner, {"type": "error", "run": run, "error": str(exc)})
+                            cleanup()
+                            break
                     now = time.monotonic()
                     if owner is not None:
                         try:
                             if now - last_heartbeat >= 0.1:
-                                send(owner, {"type": "heartbeat", "run": run})
+                                send(owner, {
+                                    "type": "heartbeat", "run": run, "transfers": transfers,
+                                    "retained_items": len(payloads), "retained_bytes": retained_size,
+                                    "peak_retained_bytes": peak_retained_size, "peak_retained_items": peak_retained_items,
+                                })
                                 last_heartbeat = now
                             for identity, worker in group.items():
                                 if worker.process.exitcode is None or worker.reported_exit:

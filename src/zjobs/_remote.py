@@ -36,6 +36,9 @@ class RemoteTransport:
         self.responses: dict[tuple[str, str], dict] = {}
         self.hello: dict[str, dict] = {}
         self.last_sent = 0.0
+        self.agent_stats: dict[str, dict] = {}
+        self.finals: dict[str, bytes] = {}
+        self.endpoints = endpoints.copy()
         try:
             for machine, endpoint in endpoints.items():
                 socket = context.socket(zmq.DEALER)
@@ -96,6 +99,15 @@ class RemoteTransport:
                 self.messages.append([identity, frames[1], frames[2]])
             elif kind in ("hello", "started", "stopped"):
                 self.responses[(machine, kind)] = message
+                if kind == "stopped":
+                    self.agent_stats[machine] = message
+            elif kind == "final":
+                if len(frames) != 2:
+                    raise RemoteError(f"agent {machine!r}: invalid final payload")
+                self.finals[message["output"]] = frames[1]
+            elif kind == "heartbeat":
+                if "transfers" in message:
+                    self.agent_stats[machine] = message
             elif kind != "heartbeat":
                 raise RemoteError(f"agent {machine!r}: unexpected response {kind!r}")
         if deadlines:
@@ -118,6 +130,7 @@ class RemoteTransport:
     def start(
         self, specs: dict[str, list[dict]], definitions: dict[bytes, bytes],
         limit: int, timeout: float,
+        retained_items: int, retained_bytes: int,
     ) -> dict[bytes, int]:
         for machine, workers in specs.items():
             if len(workers) > self.hello[machine]["max_workers"]:
@@ -130,6 +143,8 @@ class RemoteTransport:
             self._send(machine, {
                 "type": "start", "run": self.run, "workers": workers,
                 "payload_limit": limit, "capabilities": capabilities(),
+                "retained_items": retained_items, "retained_bytes": retained_bytes,
+                "peers": self.endpoints,
             }, *(definitions[worker["identity"].encode("ascii")] for worker in workers))
         self._wait(set(specs), "started", timeout)
         pids = {}
@@ -143,6 +158,12 @@ class RemoteTransport:
         if set(pids) != set(self.routes):
             raise RemoteError("agents did not start all required replicas")
         return pids
+
+    def release(self, owner: str, output: str) -> None:
+        self._send(owner, {"type": "release", "run": self.run, "output": output})
+
+    def final(self, owner: str, output: str) -> None:
+        self._send(owner, {"type": "final", "run": self.run, "output": output})
 
     def send_multipart(self, frames: list[bytes]) -> None:
         identity, command, payload = frames
