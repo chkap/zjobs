@@ -1,96 +1,75 @@
 from __future__ import annotations
 
-import inspect
+import json
+import multiprocessing as mp
 import os
+import signal
+import sys
 import threading
-import time
 import traceback
-from typing import Any
 
 import cloudpickle
 import zmq
 
-from .graph import SourceContext
-from ._payload import Payload, dumps, loads, load_group
+from ._payload import dumps, load_group, loads
 
 
-def _encode(value: Any, limit: int) -> Payload:
-    return dumps(value, limit)
-
-
-def worker_main(
-    endpoint: str, identity: bytes, definition: bytes,
-    source: bool, rank: int, replicas: int, payload_limit: int,
-    machine: str = "local", local_rank: int | None = None,
-    local_replicas: int | None = None,
-    parent_pid: int | None = None,
-) -> None:
-    if parent_pid is not None:
-        def watch_parent() -> None:
-            while True:
-                if os.getppid() != parent_pid:
-                    os._exit(143)
-                time.sleep(0.1)
-
-        threading.Thread(target=watch_parent, name="zjobs-agent-watch", daemon=True).start()
+def worker(endpoint, definition, source_context, limit, kind):
+    parent = mp.parent_process()
+    if sys.platform == "linux":
+        import ctypes
+        libc = ctypes.CDLL(None, use_errno=True)
+        if libc.prctl(1, signal.SIGTERM, 0, 0, 0) != 0:
+            raise OSError(ctypes.get_errno(), "setting worker parent-death signal failed")
+    if parent is not None and not parent.is_alive():
+        return
+    stopped = threading.Event()
+    def watch_parent():
+        while not stopped.wait(.1):
+            if parent is not None and not parent.is_alive():
+                os._exit(70)
+    guardian = threading.Thread(target=watch_parent, daemon=True)
+    guardian.start()
     context = zmq.Context()
-    socket = context.socket(zmq.DEALER)
-    socket.setsockopt(zmq.IDENTITY, identity)
+    socket = context.socket(zmq.PAIR)
     socket.setsockopt(zmq.LINGER, 0)
-    socket.setsockopt(zmq.SNDHWM, 2)
-    socket.setsockopt(zmq.RCVHWM, 2)
-    socket.setsockopt(zmq.SNDTIMEO, 1000)
+    socket.setsockopt(zmq.SNDHWM, 1)
+    socket.setsockopt(zmq.RCVHWM, 1)
+    socket.setsockopt(zmq.MAXMSGSIZE, max(65536, limit))
     socket.connect(endpoint)
-    operation = "initialize callable"
+    token = ""
     try:
-        task = cloudpickle.loads(definition)
-        if inspect.isclass(task):
+        task = cloudpickle.loads(definition) if definition is not None else None
+        if isinstance(task, type):
             task = task()
-        if not callable(task):
-            raise TypeError("constructed worker instance is not callable")
         iterator = None
-        socket.send_multipart([b"ready", b""])
+        socket.send_multipart([b'{"kind":"ready"}'])
         while True:
-            frames = socket.recv_multipart()
-            command, payload = frames[:2]
-            if command == b"stop":
-                return
-            if command == b"next" and source:
-                operation = "source iteration"
+            message = socket.recv_multipart()
+            header = json.loads(message[0])
+            token = header["token"]
+            if header["kind"] == "stop":
+                break
+            if kind == "source":
                 if iterator is None:
-                    iterator = iter(task(SourceContext(
-                        rank, replicas, machine,
-                        rank if local_rank is None else local_rank,
-                        replicas if local_replicas is None else local_replicas,
-                    )))
+                    iterator = iter(task(source_context))
                 try:
                     value = next(iterator)
                 except StopIteration:
-                    socket.send_multipart([b"done", b""])
+                    socket.send_multipart([json.dumps({"kind": "eof", "token": token}).encode()])
                     continue
-            elif command == b"task" and not source:
-                operation = "deserialize input"
-                value = loads(frames[1:])
-                operation = "execute task"
-                value = task(value)
-            elif command == b"batch" and not source:
-                operation = "deserialize batch members"
-                value = load_group(frames[1:])
+            elif kind == "batch":
+                value = load_group(message[1:])
             else:
-                raise RuntimeError(f"unexpected worker command {command!r}")
-            operation = "serialize output"
-            socket.send_multipart([b"item", *_encode(value, payload_limit)])
+                value = task(loads(message[1:]))
+            frames = dumps(value, limit)
+            socket.send_multipart(
+                [json.dumps({"kind": "result", "token": token}).encode(), *frames])
     except BaseException:
-        error = f"{operation}:\n{traceback.format_exc()[-32700:]}".encode("utf-8", errors="replace")
-        try:
-            socket.send_multipart([b"error", error])
-            # Especially during initialization, closing a DEALER immediately
-            # can discard an error before its asynchronous connection completes.
-            if socket.poll(1000):
-                socket.recv_multipart()
-        except zmq.ZMQError:
-            # A disconnected controller detects process exit or its work deadline.
-            pass
+        socket.send_multipart([json.dumps({
+            "kind": "error", "token": token, "error": traceback.format_exc()[-8000:],
+        }).encode()])
     finally:
+        stopped.set()
         socket.close()
         context.term()
