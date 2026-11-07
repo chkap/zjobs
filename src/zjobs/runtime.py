@@ -40,6 +40,7 @@ class Input:
     token: str
     size: int
     frames: _payload.Payload = ()
+    requested: float = field(default_factory=time.monotonic)
 
 
 @dataclass
@@ -58,6 +59,7 @@ class Slot:
     pending: Input | None = None
     inputs: list[Input] = field(default_factory=list)
     selection: Selection = field(default_factory=Selection)
+    candidate_cursor: int = 0
 
 
 class Run:
@@ -164,6 +166,13 @@ class Run:
         self._usage = {s.name: [0, 0] for s in self.graph.stages}
         self._peaks = {s.name: [0, 0] for s in self.graph.stages}
         self._claim_peaks = {s.name: [0, 0] for s in self.graph.stages}
+        self._buffer_peaks = {s.name: {} for s in self.graph.stages}
+        self._execution = {s.name: {
+            "attempts_started": 0, "attempts_completed": 0,
+            "worker_wall_seconds": 0., "worker_cpu_seconds": 0.,
+            "first_started": None, "last_finished": None, "peak_in_flight": 0,
+        } for s in self.graph.stages}
+        self._max_in_flight = 0
         self._children = {s.name: [c.name for c in self.graph.stages if s in c.inputs]
                           for s in self.graph.stages}
         self._claim_queue: list[tuple[str, dict]] = []
@@ -174,6 +183,7 @@ class Run:
             "local_items": {}, "peer_items": {}, "local_bytes": {}, "peer_bytes": {},
             "retries": 0, "stale_messages": 0, "renewals": 0,
             "peak_output_items": 0, "peak_output_bytes": 0,
+            "claims_granted": {}, "claims_rejected": {},
         }
         self._all_pids: list[int] = []
         if self._others:
@@ -282,6 +292,10 @@ class Run:
             if body["bye"]:
                 self._seen_bye.add(sender)
         elif kind == "claim":
+            if any(p == sender and request["token"] == body["token"]
+                   for p, request in self._claim_queue):
+                self._metrics["stale_messages"] += 1
+                return
             if len(self._claim_queue) >= self._request_bound():
                 self._fail("bounded owner claim arbitration queue exceeded")
             self._claim_queue.append((sender, body))
@@ -373,6 +387,30 @@ class Run:
 
     def _peak(self, name):
         self._peaks[name] = [max(a, b) for a, b in zip(self._peaks[name], self._usage[name])]
+        self._observe_buffers(name)
+
+    def _buffers(self, name):
+        slots = [s for s in self._slots if s.stage.name == name]
+        outputs = [o for o in self._store.values() if o.stage == name]
+        inputs = [i for s in slots for i in s.inputs]
+        pending = [s.pending for s in slots if s.pending]
+        return {
+            "actual_retained_items": len(outputs),
+            "actual_retained_bytes": sum(_payload.size(o.frames) for o in outputs),
+            "result_reserved_items": sum(s.reserved for s in slots),
+            "result_reserved_bytes": sum(s.reserved for s in slots) * self.limits.max_payload_bytes,
+            "actual_claim_items": len(inputs),
+            "actual_claim_bytes": sum(i.size for i in inputs),
+            "transfer_reserved_items": len(pending),
+            "transfer_reserved_bytes": sum(i.size for i in pending),
+            "batch_items": sum(len(s.inputs) for s in slots if s.stage.kind == "batch"),
+            "batch_bytes": sum(i.size for s in slots if s.stage.kind == "batch" for i in s.inputs),
+        }
+
+    def _observe_buffers(self, name):
+        peaks = self._buffer_peaks[name]
+        for key, value in self._buffers(name).items():
+            peaks[key] = max(peaks.get(key, 0), value)
 
     def _release_reservation(self, slot):
         if slot.reserved:
@@ -406,6 +444,7 @@ class Run:
         self._usage[slot.stage.name][1] -= self.limits.max_payload_bytes - size
         slot.reserved = False
         self._metrics["obligations_created"] += len(children)
+        self._observe_buffers(slot.stage.name)
         # This is the commit boundary: only retained output permits input ACK.
         for inp in slot.inputs:
             self._send(inp.owner, "ack", {
@@ -436,6 +475,7 @@ class Run:
             self._fail("grant payload disagrees with concrete byte reservation")
         inp.frames = tuple(frames)
         slot.inputs.append(inp)
+        self._observe_buffers(slot.stage.name)
         slot.selection.admitted(sender, self.peer.identity)
         edge = f"{inp.parent}->{inp.child}"
         prefix = "local" if sender == self.peer.identity else "peer"
@@ -456,9 +496,15 @@ class Run:
                          if p == owner and b["child"] == child)
             sender, body = self._claim_queue.pop(index)
             output = self._store.get(body["output"])
+            claim = output.obligations.get(child) if output else None
+            if claim and claim[:2] == (sender, body["token"]):
+                self._metrics["stale_messages"] += 1
+                continue
             if (output is None or child not in output.obligations or
                     output.obligations[child] is not None):
                 self._send(sender, "reject", body)
+                key = f"{child}:{sender}"
+                self._metrics["claims_rejected"][key] = self._metrics["claims_rejected"].get(key, 0) + 1
                 selector.rejected()
                 continue
             if _payload.size(output.frames) != body["size"]:
@@ -470,6 +516,8 @@ class Run:
             output.obligations[child] = (
                 sender, body["token"], time.monotonic() + self.peer.lease_timeout)
             self._send(sender, "grant", body, output.frames)
+            key = f"{child}:{sender}"
+            self._metrics["claims_granted"][key] = self._metrics["claims_granted"].get(key, 0) + 1
             selector.admitted(sender, self.peer.identity)
 
     def _candidate(self, slot):
@@ -494,7 +542,11 @@ class Run:
                                        self.graph.policy(stage, slot.rank))
         if owner is None:
             return None
-        parent, identity, size = candidates[owner][0]
+        # Spread equal ready-owner requests across candidates rather than
+        # making every peer/rank race the same oldest advertised item.
+        offset = (slot.candidate_cursor + self._members.index(self.peer.identity) *
+                  stage.replicas + slot.rank) if self._others else 0
+        parent, identity, size = candidates[owner][offset % len(candidates[owner])]
         return Input(owner, identity, parent, stage.name, uuid.uuid4().hex, size)
 
     def _input_capacity(self, slot):
@@ -504,6 +556,11 @@ class Run:
     def _command(self, slot):
         slot.task = uuid.uuid4().hex
         slot.task_started = time.monotonic()
+        self._execution[slot.stage.name]["attempts_started"] += 1
+        active = sum(bool(s.task) for s in self._slots if s.stage is slot.stage)
+        stats = self._execution[slot.stage.name]
+        stats["peak_in_flight"] = max(stats["peak_in_flight"], active)
+        self._max_in_flight = max(self._max_in_flight, sum(bool(s.task) for s in self._slots))
         if slot.stage.kind == "batch":
             frames = _payload.group_frames([i.frames for i in slot.inputs])
         else:
@@ -556,6 +613,8 @@ class Run:
                 self._command(slot)
                 continue
             slot.pending = inp
+            slot.candidate_cursor += 1
+            self._observe_buffers(slot.stage.name)
             # Peaks include pending (pre-transfer) reservations.
             stage_usage = [
                 sum(len(s.inputs) + bool(s.pending) for s in self._slots if s.stage is slot.stage),
@@ -586,6 +645,15 @@ class Run:
                 self._metrics["stale_messages"] += 1
                 continue
             slot.task = ""
+            if header["kind"] in ("eof", "result"):
+                stats = self._execution[slot.stage.name]
+                stats["attempts_completed"] += 1
+                stats["worker_wall_seconds"] += header["finished"] - header["started"]
+                stats["worker_cpu_seconds"] += header["cpu_seconds"]
+                stats["first_started"] = min(stats["first_started"] or header["started"],
+                                             header["started"])
+                stats["last_finished"] = max(stats["last_finished"] or header["finished"],
+                                             header["finished"])
             if header["kind"] == "error":
                 self._fail(f"{slot.stage.name}/{slot.rank}: task error: {header['error']}")
             elif header["kind"] == "eof":
@@ -605,6 +673,10 @@ class Run:
             if peer in self._seen and now - self._seen[peer] > self.peer.heartbeat_timeout:
                 self._fail(f"peer {peer}: heartbeat deadline exceeded")
         for slot in list(self._slots):
+            if slot.pending and now - slot.pending.requested > self.peer.claim_timeout:
+                inp = slot.pending
+                self._fail(f"{slot.stage.name}/{slot.rank}: peer {inp.owner} claim response "
+                           f"deadline exceeded for {inp.output}; reservation remains fenced")
             if slot.eof:
                 continue
             expired = ((not slot.ready and now - slot.started > self.limits.task_timeout) or
@@ -619,6 +691,7 @@ class Run:
                     replacement.inputs = slot.inputs
                     replacement.retries = slot.retries + 1
                     replacement.selection = slot.selection
+                    replacement.candidate_cursor = slot.candidate_cursor
                     self._slots[self._slots.index(slot)] = replacement
                     self._metrics["retries"] += 1
                 else:
@@ -671,6 +744,7 @@ class Run:
     def _completion(self):
         for stage in self.graph.stages:
             slots = [s for s in self._slots if s.stage is stage]
+            self._observe_buffers(stage.name)
             if stage.kind == "source":
                 done = all(s.eof for s in slots)
             else:
@@ -719,6 +793,9 @@ class Run:
                 "produced": self._produced[stage.name],
                 "production_watermark": (self._produced[stage.name]
                                          if stage.name in self._sealed else None),
+                "buffers": self._buffers(stage.name),
+                "buffer_peaks": dict(self._buffer_peaks[stage.name]),
+                "execution": dict(self._execution[stage.name]),
             }
         with self._condition:
             self._status = {
@@ -737,6 +814,7 @@ class Run:
                 "complete_ready": self._ready, "iteration_done": self._iteration_done,
                 "error": str(self._error) if self._error else None,
                 "worker_pids": list(self._all_pids),
+                "peak_in_flight": self._max_in_flight,
             }
 
     def _stop_worker(self, slot):
@@ -801,8 +879,8 @@ class Run:
                 self._deadlines(now)
                 self._consume()
                 if joined:
-                    self._arbitrate()
                     self._schedule()
+                    self._arbitrate()
                     shutdown_agreed = self._completion()
                 else:
                     shutdown_agreed = False
