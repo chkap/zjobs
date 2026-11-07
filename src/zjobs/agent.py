@@ -1,0 +1,220 @@
+"""Manually launched trusted-user host agent: ``python -m zjobs.agent``."""
+
+from __future__ import annotations
+
+import argparse
+import math
+import multiprocessing as mp
+import os
+import signal
+import sys
+import time
+from dataclasses import dataclass
+
+import zmq
+
+from ._protocol import capabilities, configure, decode, encode, stop_processes
+from ._worker import worker_main
+
+
+@dataclass
+class _Worker:
+    process: mp.Process
+    reported_exit: bool = False
+    exited_since: float | None = None
+
+
+def serve(
+    machine: str, bind: str, advertise: str, *,
+    lease_timeout: float = 3.0, max_workers: int = 256,
+) -> None:
+    """Serve one active run at a time, leaving the agent alive between runs."""
+    stopping = False
+
+    def interrupt(signum, frame):
+        nonlocal stopping
+        stopping = True
+
+    signal.signal(signal.SIGTERM, interrupt)
+    signal.signal(signal.SIGINT, interrupt)
+    with zmq.Context() as context:
+        with context.socket(zmq.ROUTER) as control, context.socket(zmq.ROUTER) as workers:
+            configure(control)
+            configure(workers)
+            control.setsockopt(zmq.ROUTER_MANDATORY, 1)
+            workers.setsockopt(zmq.ROUTER_MANDATORY, 1)
+            control.bind(bind)
+            port = workers.bind_to_random_port("tcp://127.0.0.1")
+            worker_endpoint = f"tcp://127.0.0.1:{port}"
+            poller = zmq.Poller()
+            poller.register(control, zmq.POLLIN)
+            poller.register(workers, zmq.POLLIN)
+            owner: bytes | None = None
+            run: str | None = None
+            last_seen = 0.0
+            last_heartbeat = 0.0
+            group: dict[bytes, _Worker] = {}
+
+            def send(recipient: bytes, message: dict, *frames: bytes) -> None:
+                control.send_multipart([recipient, encode(message), *frames])
+
+            def cleanup() -> None:
+                nonlocal owner, run, group
+                for identity in group:
+                    try:
+                        workers.send_multipart([identity, b"stop", b""], zmq.DONTWAIT)
+                    except zmq.ZMQError:
+                        pass
+                stop_processes([worker.process for worker in group.values()])
+                group = {}
+                owner = None
+                run = None
+                # Old run identities include a UUID and are never reused.
+
+            print(encode({
+                "event": "ready", "machine": machine, "endpoint": advertise,
+                **capabilities(), "lease_timeout": lease_timeout,
+            }).decode(), flush=True)
+            try:
+                while not stopping:
+                    now = time.monotonic()
+                    if owner is not None and now - last_seen > lease_timeout:
+                        print(f"agent {machine}: run {run} controller lease expired; cleaning workers",
+                              file=sys.stderr, flush=True)
+                        cleanup()
+                    events = dict(poller.poll(20))
+                    if control in events:
+                        frames = control.recv_multipart()
+                        recipient = frames[0]
+                        message = {}
+                        try:
+                            message = decode(frames[1])
+                            kind = message["type"]
+                            if kind == "hello":
+                                send(recipient, {
+                                    "type": "hello", "machine": machine,
+                                    "endpoint": advertise, **capabilities(),
+                                    "lease_timeout": lease_timeout,
+                                    "max_workers": max_workers,
+                                })
+                            elif kind == "start":
+                                if owner is not None:
+                                    raise ValueError(f"agent {machine} is busy with run {run}")
+                                if message["capabilities"] != capabilities():
+                                    raise ValueError("incompatible protocol/Python/cloudpickle/transport")
+                                specs = message["workers"]
+                                if not specs or len(specs) > max_workers:
+                                    raise ValueError(f"worker count exceeds agent capacity {max_workers}")
+                                if len(frames) != 2 + len(specs):
+                                    raise ValueError("worker definition count does not match placement")
+                                owner, run = recipient, message["run"]
+                                last_seen = time.monotonic()
+                                spawn = mp.get_context("spawn")
+                                for spec, definition in zip(specs, frames[2:]):
+                                    if stopping:
+                                        raise RuntimeError("agent is stopping")
+                                    identity = spec["identity"].encode("ascii")
+                                    if identity in group:
+                                        raise ValueError("duplicate worker identity")
+                                    process = spawn.Process(
+                                        target=worker_main,
+                                        args=(
+                                            worker_endpoint, identity, definition,
+                                            spec["source"], spec["rank"], spec["replicas"],
+                                            message["payload_limit"], machine,
+                                            spec["local_rank"], spec["local_replicas"],
+                                            os.getpid(),
+                                        ),
+                                        name=f"zjobs-{spec['stage']}-{spec['rank']}",
+                                    )
+                                    process.start()
+                                    group[identity] = _Worker(process)
+                                    send(recipient, {"type": "heartbeat", "run": run})
+                                last_seen = time.monotonic()
+                                send(recipient, {
+                                    "type": "started", "run": run,
+                                    "pids": {key.decode(): value.process.pid for key, value in group.items()},
+                                })
+                            elif recipient != owner or message.get("run") != run:
+                                raise ValueError("command does not own this agent run")
+                            elif kind == "heartbeat":
+                                last_seen = time.monotonic()
+                            elif kind == "command":
+                                last_seen = time.monotonic()
+                                identity = message["worker"].encode("ascii")
+                                if identity not in group or len(frames) != 4:
+                                    raise ValueError("unknown worker or invalid command frames")
+                                workers.send_multipart([identity, frames[2], frames[3]])
+                            elif kind == "stop":
+                                stopped_run = run
+                                cleanup()
+                                send(recipient, {"type": "stopped", "run": stopped_run})
+                            else:
+                                raise ValueError(f"unknown agent command {kind!r}")
+                        except (ValueError, KeyError, TypeError, RuntimeError, OSError, zmq.ZMQError) as exc:
+                            print(f"agent {machine}: {exc}", file=sys.stderr, flush=True)
+                            failed_run = message.get("run")
+                            if recipient == owner:
+                                cleanup()
+                            try:
+                                send(recipient, {"type": "error", "run": failed_run, "error": str(exc)})
+                            except zmq.ZMQError as send_error:
+                                print(f"agent {machine}: cannot report error: {send_error}",
+                                      file=sys.stderr, flush=True)
+                    if workers in events:
+                        identity, kind, payload = workers.recv_multipart()
+                        if identity in group and owner is not None:
+                            try:
+                                send(owner, {
+                                    "type": "worker", "run": run, "worker": identity.decode(),
+                                }, kind, payload)
+                            except zmq.ZMQError as exc:
+                                print(f"agent {machine}: controller disconnected: {exc}",
+                                      file=sys.stderr, flush=True)
+                                cleanup()
+                    now = time.monotonic()
+                    if owner is not None:
+                        try:
+                            if now - last_heartbeat >= 0.1:
+                                send(owner, {"type": "heartbeat", "run": run})
+                                last_heartbeat = now
+                            for identity, worker in group.items():
+                                if worker.process.exitcode is None or worker.reported_exit:
+                                    continue
+                                if worker.exited_since is None:
+                                    worker.exited_since = now
+                                if now - worker.exited_since < 0.1:
+                                    continue
+                                send(owner, {
+                                    "type": "worker", "run": run, "worker": identity.decode(),
+                                }, b"error", f"worker exited with code {worker.process.exitcode}".encode())
+                                worker.reported_exit = True
+                        except zmq.ZMQError as exc:
+                            print(f"agent {machine}: connection failure: {exc}",
+                                  file=sys.stderr, flush=True)
+                            cleanup()
+            finally:
+                cleanup()
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Trusted zjobs static host agent (no authentication)")
+    parser.add_argument("--machine", required=True, help="Unique configured machine identity")
+    parser.add_argument("--bind", required=True, help="TCP listen endpoint, e.g. tcp://0.0.0.0:5555")
+    parser.add_argument("--advertise", required=True, help="Reachable TCP endpoint, e.g. tcp://host:5555")
+    parser.add_argument("--lease-timeout", type=float, default=3.0)
+    parser.add_argument("--max-workers", type=int, default=256)
+    args = parser.parse_args()
+    if (
+        not args.machine or not args.bind.startswith("tcp://")
+        or not args.advertise.startswith("tcp://")
+        or not math.isfinite(args.lease_timeout) or args.lease_timeout < 0.5
+        or args.max_workers < 1
+    ):
+        parser.error("require a machine identity, TCP endpoints, lease-timeout >= 0.5 and positive max-workers")
+    serve(args.machine, args.bind, args.advertise,
+          lease_timeout=args.lease_timeout, max_workers=args.max_workers)
+
+
+if __name__ == "__main__":
+    main()

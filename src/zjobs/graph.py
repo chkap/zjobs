@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, Iterable, Iterator
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Iterator, Mapping
 
 if TYPE_CHECKING:
     from .runtime import Run
@@ -14,6 +14,17 @@ class SourceContext:
 
     rank: int
     replicas: int
+    machine: str = "local"
+    local_rank: int = 0
+    local_replicas: int = 1
+
+    @property
+    def global_rank(self) -> int:
+        return self.rank
+
+    @property
+    def global_replicas(self) -> int:
+        return self.replicas
 
     def shard(self, items: Iterable[Any]) -> Iterator[Any]:
         """Select this rank's items; shard identifiers before expensive loading."""
@@ -26,6 +37,17 @@ class Node:
     task: Callable[..., Any]
     replicas: int
     inputs: tuple[Node, ...]
+    placement: tuple[tuple[str, int], ...] = ()
+
+
+@dataclass(frozen=True)
+class ReplicaPlacement:
+    stage: str
+    machine: str
+    rank: int
+    replicas: int
+    local_rank: int
+    local_replicas: int
 
 
 class Graph:
@@ -34,9 +56,12 @@ class Graph:
     def __init__(self) -> None:
         self._nodes: list[Node] = []
 
-    def source(self, name: str, task: Callable[..., Any], *, replicas: int = 1) -> Node:
+    def source(
+        self, name: str, task: Callable[..., Any], *, replicas: int = 1,
+        placement: Mapping[str, int] | None = None,
+    ) -> Node:
         """Add a callable(context) -> iterable source, invoked once per replica."""
-        return self._add(name, task, replicas, ())
+        return self._add(name, task, replicas, (), placement)
 
     def map(
         self,
@@ -45,6 +70,7 @@ class Graph:
         *,
         inputs: Iterable[Node],
         replicas: int = 1,
+        placement: Mapping[str, int] | None = None,
     ) -> Node:
         """Add callable(item) -> item; multiple inputs interleave without ordering."""
         parents = tuple(inputs)
@@ -54,10 +80,11 @@ class Graph:
             raise ValueError("duplicate input edges are not allowed")
         if any(parent not in self._nodes for parent in parents):
             raise ValueError("inputs must be existing nodes of this graph")
-        return self._add(name, task, replicas, parents)
+        return self._add(name, task, replicas, parents, placement)
 
     def _add(
-        self, name: str, task: Callable[..., Any], replicas: int, inputs: tuple[Node, ...]
+        self, name: str, task: Callable[..., Any], replicas: int, inputs: tuple[Node, ...],
+        placement: Mapping[str, int] | None,
     ) -> Node:
         if (
             not isinstance(name, str)
@@ -69,7 +96,20 @@ class Graph:
             raise TypeError(f"stage {name!r} task must be callable")
         if isinstance(replicas, bool) or not isinstance(replicas, int) or replicas < 1:
             raise ValueError("replicas must be a positive integer")
-        node = Node(name, task, replicas, inputs)
+        hosts: tuple[tuple[str, int], ...] = ()
+        if placement is not None:
+            if replicas != 1:
+                raise ValueError("use placement counts instead of replicas")
+            if not placement:
+                raise ValueError("placement must contain at least one machine")
+            for machine, count in placement.items():
+                if not isinstance(machine, str) or not machine:
+                    raise ValueError("machine identities must be nonempty strings")
+                if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+                    raise ValueError("placement counts must be positive integers")
+            hosts = tuple(sorted(placement.items()))
+            replicas = sum(count for _, count in hosts)
+        node = Node(name, task, replicas, inputs, hosts)
         self._nodes.append(node)
         return node
 
@@ -81,6 +121,8 @@ class Graph:
         worker_timeout: float = 30.0,
         consumer_timeout: float = 30.0,
         max_payload_bytes: int = 64 * 1024 * 1024,
+        agents: Mapping[str, str] | None = None,
+        agent_timeout: float = 3.0,
     ) -> Run:
         """Launch a snapshot; use the returned iterator as a context manager."""
         from .runtime import Run
@@ -95,7 +137,8 @@ class Graph:
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise ValueError(f"{name} must be a positive integer")
         for name, value in (
-            ("worker_timeout", worker_timeout), ("consumer_timeout", consumer_timeout)
+            ("worker_timeout", worker_timeout), ("consumer_timeout", consumer_timeout),
+            ("agent_timeout", agent_timeout),
         ):
             if (
                 isinstance(value, bool)
@@ -106,5 +149,5 @@ class Graph:
                 raise ValueError(f"{name} must be finite and positive")
         return Run(
             tuple(self._nodes), capacity, output_capacity, worker_timeout,
-            consumer_timeout, max_payload_bytes,
+            consumer_timeout, max_payload_bytes, agents, agent_timeout,
         )
