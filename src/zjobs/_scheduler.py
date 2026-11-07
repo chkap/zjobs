@@ -14,6 +14,7 @@ from ._remote import RemoteTransport
 from ._worker import worker_main
 from .graph import ReplicaPlacement
 from .runtime import RunError
+from ._payload import Payload, size as payload_size, group_frames
 
 if TYPE_CHECKING:
     from .runtime import Run
@@ -76,7 +77,7 @@ def coordinate(run: Run, transport: zmq.Socket | RemoteTransport) -> None:
     complete = [False for _ in nodes]
     replicas: dict[bytes, Replica] = {}
     outputs: dict[str, Output] = {}
-    local_payloads: dict[str, bytes] = {}
+    local_payloads: dict[str, Payload] = {}
     used_items = {p.machine: 0 for p in run.placement}
     used_bytes = used_items.copy()
     peak_items = used_items.copy()
@@ -283,7 +284,7 @@ def coordinate(run: Run, transport: zmq.Socket | RemoteTransport) -> None:
                     else:
                         payload = local_payloads[output.key]
                         with run._lock:
-                            run._buffered_bytes += len(payload)
+                            run._buffered_bytes += payload_size(payload)
                             run._stats["peak_output_buffered"] = max(
                                 run._stats["peak_output_buffered"], run._outputs.qsize() + 1,
                             )
@@ -299,10 +300,10 @@ def coordinate(run: Run, transport: zmq.Socket | RemoteTransport) -> None:
             if isinstance(transport, RemoteTransport):
                 for key, payload in list(transport.finals.items()):
                     output = outputs[key]
-                    if len(payload) != output.size or not output.final_requested:
+                    if payload_size(payload) != output.size or not output.final_requested:
                         raise RunError(f"output {key}: invalid final payload length or state")
                     with run._lock:
-                        run._buffered_bytes += len(payload)
+                        run._buffered_bytes += payload_size(payload)
                         run._stats["peak_output_buffered"] = max(
                             run._stats["peak_output_buffered"], run._outputs.qsize() + final_reserved,
                         )
@@ -311,7 +312,7 @@ def coordinate(run: Run, transport: zmq.Socket | RemoteTransport) -> None:
                             run._buffered_bytes + final_reserved_bytes - output.size,
                         )
                         run._outputs.put_nowait(payload)
-                        run._stats["final_bytes"] += len(payload)
+                        run._stats["final_bytes"] += payload_size(payload)
                     final_reserved -= 1
                     final_reserved_bytes -= output.size
                     replica = replicas[output.producer]
@@ -460,16 +461,19 @@ def coordinate(run: Run, transport: zmq.Socket | RemoteTransport) -> None:
                 with run._lock:
                     run._stats["attempts"] += 1
                 if command == b"batch" and isinstance(transport, zmq.Socket):
-                    transport.send_multipart([identity, command, *[
+                    transport.send_multipart([identity, command, *group_frames([
                         local_payloads[member.key] for member in replica.members
-                    ]])
+                    ])])
+                elif command == b"task" and isinstance(transport, zmq.Socket):
+                    transport.send_multipart([identity, command, *payload])
                 else:
                     transport.send_multipart([identity, command, payload])
                 replica.state = "busy"
                 replica.since = time.monotonic()
                 progress = True
             if transport.poll(10):
-                identity, kind, payload = transport.recv_multipart()
+                received = transport.recv_multipart()
+                identity, kind, payload = received[:3]
                 if identity in retired:
                     with run._lock:
                         run._stats["stale_results"] += 1
@@ -498,8 +502,9 @@ def coordinate(run: Run, transport: zmq.Socket | RemoteTransport) -> None:
                         if owner != replica.placement.machine or key in outputs:
                             raise RunError(f"{label(replica)}: invalid output owner/identity")
                     else:
-                        key, owner, size = f"{run._run_id}:local:{sequence}", "local", len(payload)
-                        local_payloads[key] = payload
+                        frames = tuple(received[2:])
+                        key, owner, size = f"{run._run_id}:local:{sequence}", "local", payload_size(frames)
+                        local_payloads[key] = frames
                     if not isinstance(size, int) or not 0 <= size <= run._payload_limit:
                         raise RunError(f"{label(replica)}: received payload exceeds limit")
                     if isinstance(transport, RemoteTransport):

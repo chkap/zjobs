@@ -1,13 +1,13 @@
 # zjobs
 
 A small Python/ZMQ streaming DAG runtime for trusted Python code. **Version
-0.5 supports local processes, static host agents, host-owned locality,
-bounded replay and independently placed in-graph batching**.
+0.6 supports local processes, static host agents, host-owned locality,
+bounded replay, independently placed batching and framed large payloads**.
 Independent stage scaling, sharded sources, bounded streaming, fan-out/fan-in,
 and cancellation work today. Machine-based locality
 (`local_first`, `balanced`, `local_only` and their precedence) uses actual
-agent-retained payload availability. Optimized array/tensor serialization and distributed performance measurements
-remain follow-on work. Network execution has been tested with separate agent
+agent-retained payload availability. Application scaling/examples remain
+follow-on work. Network execution has been tested with separate agent
 processes on one host, including a non-loopback endpoint. **Actual multi-machine
 execution evidence is still outstanding**; host aliases are not physical hosts.
 
@@ -388,9 +388,9 @@ queues, one outstanding work/result credit per replica, and a bounded final
 queue. Each producer also has only one retained output credit until all
 branches settle, preventing a fast source from filling a host while downstream
 workers initialize. Serialized fan-out data is reused in producer-agent memory;
-the controller queues references only. Transport uses
-ordinary cloudpickle protocol-5 bytes (not shared memory or zero-copy array
-frames). The controller rotates scheduling order; no stage input ordering is
+the controller queues references only. Transport uses a small protocol-5 pickle
+envelope plus out-of-band buffers as one logical multipart payload; exact
+built-in `bytes` bypass pickle wrapping. The controller rotates scheduling order; no stage input ordering is
 promised. Agent payload stores and transfers are bounded; work
 credits, not heartbeats, permit payload production. Agent launch as a whole
 must finish within `worker_timeout`, followed by per-worker initialization/call
@@ -421,9 +421,82 @@ hard process RSS ceiling. Agent stores enforce configured bytes/items, while
 per-rank input/result transport frames can coexist with retained buffers.
 Python user code, serialization temporaries, decoded
 objects, callable state, ZMQ framing, and consumer-retained outputs add memory.
-Do not return unbounded objects or retain unbounded state. Arrays/CPU tensors
-can be ordinary pickleable payloads when dependencies are installed, but this
-slice makes no large-payload efficiency or performance claims.
+Do not return unbounded objects or retain unbounded state.
+
+### Large payloads and measured tradeoffs
+
+Every logical payload includes its format marker, pickle envelope (when used),
+and all buffer frames. Their **sum** counts against `max_payload_bytes`,
+retained/queue/final byte budgets and aggregate batch member limits. A payload
+has at most 1,024 frames (1,022 out-of-band buffers); excess frames fail explicitly.
+Batch command frame directories and agent control envelopes are transport
+metadata, not serialized member bytes. Transfer counters sum actual transmitted
+logical payload frame bytes, excluding ZMQ wire headers and control traffic.
+Fan-out and retries reuse the same immutable retained frame tuple until all
+required edges settle. Byte limits remain logical credits, not total RSS limits.
+
+Protocol-5-compatible contiguous NumPy arrays use buffers; other arrays/objects
+use their normal pickle reducers. Array shape/dtype/values and C/Fortran layout
+are preserved where the reducer supports them; noncontiguous NumPy slices
+normally reconstruct contiguous, as with ordinary pickle. Writable buffers are
+snapshotted at serialization and reconstructed into isolated writable storage
+per consumer, so later user mutation cannot corrupt another branch or replay.
+Read-only NumPy arrays remain read-only. This deliberately retains copies:
+ZMQ uses its normal copying sends, not `copy=False`; **this is not zero-copy or
+shared memory**.
+
+Torch's default reducer in the measured release stays in-band. A narrow
+fallback therefore frames plain contiguous CPU `torch.Tensor` values when
+NumPy is installed, including scalar/empty, bfloat16 and complex tensors.
+It preserves dtype, shape, values and `requires_grad`, not autograd history.
+Tensor subclasses, custom attributes/hooks, noncontiguous/quantized/conjugate
+layouts and tensors without NumPy use torch's existing reducer. They receive
+no promised optimization. Core import/execution requires neither NumPy nor torch.
+
+`examples/measure_payload.py` prints JSON with raw trial durations, correctness,
+serialization allocations, controller/max-child peak RSS, retained/queue/final
+peaks and agent-observed transfer bytes. Run the **same script** from separate
+noneditable baseline/candidate installations:
+
+```sh
+# Install numpy for array probes; install CPU torch separately for tensor probes.
+python examples/measure_payload.py --mode serialize --kind numpy --mib 16 --items 8 --trials 3
+python examples/measure_payload.py --kind numpy --mib 8 --items 12 --trials 3 --network-host 10.0.0.4
+# Repeat with --kind bytes and --kind torch. Choose a bindable local IP.
+```
+
+On one Linux physical host with Python 3.12, cloudpickle 3.1.2, pyzmq 27.3.0,
+NumPy 2.5.4 and CPU torch 2.15.0, comparing accepted 0.5.0 (`6504bb9`) with
+0.6.0: serialization-only median traced encoding peaks for 16 MiB values fell
+from 18.00 MiB to 276 bytes for exact bytes, 18.00 to 16.01 MiB for NumPy,
+and 34.01 to 16.01 MiB for contiguous tensors. These exclude already-created
+user values and native allocations; they are not whole-process RSS.
+
+The application probe actually loads twelve 8 MiB values, preprocesses them
+(array/tensor addition), collects groups of two and verifies every final value.
+One source on agent `a`, one preprocessing rank on `b`, one collector on `a`
+forces two remote payload transfers, plus final delivery to the controller.
+Agent startup precedes timing; worker startup/imports and consumption are timed.
+Three fresh-process trials (seconds):
+
+| Payload | 0.5.0 trials | 0.6.0 trials | Median max-child RSS, before / after |
+| --- | --- | --- | --- |
+| bytes | 0.728, 0.708, 0.708 | 0.607, 0.618, 0.633 | 131.8 / 108.0 MiB |
+| NumPy | 0.961, 0.907, 0.879 | 0.931, 0.937, 1.046 | 143.0 / 127.0 MiB |
+| CPU tensor | 4.662, 3.946, 3.923 | 3.907, 3.852, 3.853 | 354.2 / 322.8 MiB |
+
+Linux child RSS is the maximum individual child peak, **not summed concurrent
+RSS**. Controller RSS was essentially unchanged for bytes/arrays and lower for
+tensors. NumPy was slightly slower despite lower allocation/child RSS: isolated
+mutable reconstruction still copies buffers, and scheduling/transport dominate
+this small pipeline. Torch imports dominate cold-run latency. There is no
+universal speedup claim. Remote payload bytes remain approximately 192 MiB and
+final bytes 96 MiB (metadata changes only); framing reduces allocation, not the
+data required by placement. Store peaks vary with scheduling and remain under
+credits; they do not measure serialization temporaries.
+These non-loopback TCP trials use **two host identities on one physical
+machine**, not physical multi-host or scaling evidence. Practical IO/scaling
+examples and actual distinct-host evidence remain separate work.
 
 Always use `with graph.run() as run:` or call `run.close()` in a `finally`
 block. Early exit cancels the graph and joins/terminates its owned workers;

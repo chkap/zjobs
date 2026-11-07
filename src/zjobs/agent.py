@@ -15,6 +15,7 @@ import zmq
 
 from ._protocol import capabilities, configure, decode, encode, stop_processes
 from ._worker import worker_main
+from ._payload import Payload, size, group_frames, MAX_FRAMES
 
 
 @dataclass
@@ -54,14 +55,14 @@ def serve(
             last_seen = 0.0
             last_heartbeat = 0.0
             group: dict[bytes, _Worker] = {}
-            payloads: dict[str, bytes] = {}
+            payloads: dict[str, Payload] = {}
             payload_workers: dict[str, bytes] = {}
             accepted: set[str] = set()
             sequence = 0
             peers: dict[str, zmq.Socket] = {}
             fetching: dict[bytes, str] = {}
             groups: dict[bytes, list[dict]] = {}
-            group_payloads: dict[bytes, list[bytes]] = {}
+            group_payloads: dict[bytes, list[Payload]] = {}
             byte_limit = 0
             item_limit = 0
             payload_limit = 0
@@ -119,10 +120,10 @@ def serve(
                         return
                     payload = payloads[reference["output"]]
                     transfers["local_items"] += 1
-                    transfers["local_bytes"] += len(payload)
+                    transfers["local_bytes"] += size(payload)
                     group_payloads[identity].append(payload)
                     groups[identity].pop(0)
-                workers.send_multipart([identity, b"batch", *group_payloads.pop(identity)])
+                workers.send_multipart([identity, b"batch", *group_frames(group_payloads.pop(identity))])
                 groups.pop(identity)
 
             try:
@@ -200,11 +201,11 @@ def serve(
                                 if message["run"] != run or message["output"] not in payloads:
                                     raise ValueError("requested payload is not available in this run")
                                 payload = payloads[message["output"]]
-                                transfers["served_remote_bytes"] += len(payload)
+                                transfers["served_remote_bytes"] += size(payload)
                                 send(recipient, {
                                     "type": "fetched", "run": run, "worker": message["worker"],
                                     "output": message["output"],
-                                }, payload)
+                                }, *payload)
                             elif recipient != owner or message.get("run") != run:
                                 raise ValueError("command does not own this agent run")
                             elif kind == "heartbeat":
@@ -223,8 +224,8 @@ def serve(
                                     if reference["owner"] == machine:
                                         payload = payloads[reference["output"]]
                                         transfers["local_items"] += 1
-                                        transfers["local_bytes"] += len(payload)
-                                        workers.send_multipart([identity, b"task", payload])
+                                        transfers["local_bytes"] += size(payload)
+                                        workers.send_multipart([identity, b"task", *payload])
                                     else:
                                         fetching[identity] = reference["output"]
                                         peers[reference["owner"]].send_multipart([encode({
@@ -237,7 +238,7 @@ def serve(
                                 payload = payloads.pop(message["output"])
                                 payload_workers.pop(message["output"])
                                 accepted.discard(message["output"])
-                                retained_size -= len(payload)
+                                retained_size -= size(payload)
                             elif kind == "accept":
                                 if message["output"] not in payloads:
                                     raise ValueError("cannot acknowledge unavailable output")
@@ -251,7 +252,7 @@ def serve(
                                 retired.add(old)
                                 for output in list(payloads):
                                     if payload_workers[output] == old and output not in accepted:
-                                        retained_size -= len(payloads.pop(output))
+                                        retained_size -= size(payloads.pop(output))
                                         payload_workers.pop(output)
                                 fetching.pop(old, None)
                                 groups.pop(old, None)
@@ -278,10 +279,10 @@ def serve(
                                                  "worker": identity.decode(), "pid": process.pid})
                             elif kind == "final":
                                 payload = payloads[message["output"]]
-                                transfers["final_bytes"] += len(payload)
+                                transfers["final_bytes"] += size(payload)
                                 send(recipient, {
                                     "type": "final", "run": run, "output": message["output"],
-                                }, payload)
+                                }, *payload)
                             elif kind == "stop":
                                 stopped_run = run
                                 final_transfers = transfers.copy()
@@ -308,25 +309,30 @@ def serve(
                                 print(f"agent {machine}: cannot report error: {send_error}",
                                       file=sys.stderr, flush=True)
                     if workers in events:
-                        identity, kind, payload = workers.recv_multipart()
+                        worker_frames = workers.recv_multipart()
+                        identity, kind = worker_frames[:2]
+                        payload = tuple(worker_frames[2:])
                         if identity in group and owner is not None:
                             try:
                                 if kind == b"item":
-                                    if len(payloads) >= item_limit or retained_size + len(payload) > byte_limit:
+                                    total = size(payload)
+                                    if len(payload) > MAX_FRAMES or total > payload_limit:
+                                        raise RuntimeError("agent received oversized logical payload")
+                                    if len(payloads) >= item_limit or retained_size + total > byte_limit:
                                         raise RuntimeError("agent retained payload capacity exceeded")
                                     sequence += 1
                                     output = f"{run}:{machine}:{sequence}"
                                     payloads[output] = payload
                                     payload_workers[output] = identity
-                                    retained_size += len(payload)
+                                    retained_size += total
                                     peak_retained_size = max(peak_retained_size, retained_size)
                                     peak_retained_items = max(peak_retained_items, len(payloads))
-                                    payload = encode({
-                                        "output": output, "owner": machine, "size": len(payload),
-                                    })
+                                    payload = (encode({
+                                        "output": output, "owner": machine, "size": total,
+                                    }),)
                                 send(owner, {
                                     "type": "worker", "run": run, "worker": identity.decode(),
-                                }, kind, payload)
+                                }, kind, *payload)
                             except RuntimeError as exc:
                                 print(f"agent {machine}: payload accounting failure: {exc}",
                                       file=sys.stderr, flush=True)
@@ -347,19 +353,21 @@ def serve(
                                 continue
                             if (
                                 message.get("type") != "fetched" or message.get("run") != run
-                                or fetching.get(identity) != message.get("output") or len(frames) != 2
+                                or fetching.get(identity) != message.get("output") or len(frames) < 3
                             ):
                                 raise ValueError(f"invalid/missing payload from agent {peer_machine}")
                             fetching.pop(identity)
-                            payload = frames[1]
+                            payload = tuple(frames[1:])
+                            if len(payload) > MAX_FRAMES or size(payload) > payload_limit:
+                                raise ValueError("peer returned oversized logical payload")
                             transfers["remote_items"] += 1
-                            transfers["remote_bytes"] += len(payload)
+                            transfers["remote_bytes"] += size(payload)
                             if identity in groups:
                                 group_payloads[identity].append(payload)
                                 groups[identity].pop(0)
                                 deliver_group(identity)
                             else:
-                                workers.send_multipart([identity, b"task", payload])
+                                workers.send_multipart([identity, b"task", *payload])
                         except (ValueError, zmq.ZMQError) as exc:
                             if owner is not None:
                                 send(owner, {"type": "error", "run": run, "error": str(exc)})

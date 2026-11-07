@@ -14,6 +14,7 @@ import zmq
 from ._protocol import configure
 from ._remote import RemoteCancelled, RemoteTransport
 from .graph import Node, ReplicaPlacement
+from ._payload import Payload, size, loads
 
 _SHIPPING_LOCK = threading.Lock()
 
@@ -108,7 +109,7 @@ class Run(Iterator[Any]):
                             f"local_only impossible routing: stage {parent.name!r} machine "
                             f"{producer.machine!r} -> stage {node.name!r} has no eligible consumer"
                         )
-        self._outputs: queue.Queue[bytes] = queue.Queue(output_capacity)
+        self._outputs: queue.Queue[Payload] = queue.Queue(output_capacity)
         self._buffered_bytes = 0
         self._cancel = threading.Event()
         self._finished = threading.Event()
@@ -155,10 +156,10 @@ class Run(Iterator[Any]):
                     raise StopIteration
                 continue
             with self._lock:
-                self._buffered_bytes -= len(payload)
+                self._buffered_bytes -= size(payload)
                 self._last_consumed = time.monotonic()
             try:
-                return cloudpickle.loads(payload)
+                return loads(payload)
             except Exception as exc:
                 self.close()
                 error = RunError(f"final output: deserialize payload: {exc}")
