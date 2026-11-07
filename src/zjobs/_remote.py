@@ -97,7 +97,7 @@ class RemoteTransport:
                 if self.routes.get(identity) != machine or len(frames) != 3:
                     raise RemoteError(f"agent {machine!r}: invalid worker response")
                 self.messages.append([identity, frames[1], frames[2]])
-            elif kind in ("hello", "started", "stopped"):
+            elif kind in ("hello", "started", "stopped", "replaced"):
                 self.responses[(machine, kind)] = message
                 if kind == "stopped":
                     self.agent_stats[machine] = message
@@ -162,8 +162,25 @@ class RemoteTransport:
     def release(self, owner: str, output: str) -> None:
         self._send(owner, {"type": "release", "run": self.run, "output": output})
 
+    def accept(self, owner: str, output: str) -> None:
+        self._send(owner, {"type": "accept", "run": self.run, "output": output})
+
     def final(self, owner: str, output: str) -> None:
         self._send(owner, {"type": "final", "run": self.run, "output": output})
+
+    def replace(self, old: bytes, spec: dict, definition: bytes, timeout: float) -> int:
+        machine = self.routes[old]
+        identity = spec["identity"].encode("ascii")
+        self.routes[identity] = machine
+        self._send(machine, {
+            "type": "replace", "run": self.run, "old": old.decode("ascii"),
+            "worker": spec,
+        }, definition)
+        self._wait({machine}, "replaced", timeout)
+        response = self.responses.pop((machine, "replaced"))
+        if response.get("worker") != spec["identity"]:
+            raise RemoteError(f"agent {machine!r}: unexpected replacement identity")
+        return response["pid"]
 
     def send_multipart(self, frames: list[bytes]) -> None:
         identity, command, payload = frames

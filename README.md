@@ -1,12 +1,12 @@
 # zjobs
 
 A small Python/ZMQ streaming DAG runtime for trusted Python code. **Version
-0.3 supports local processes, static host agents and host-owned locality**.
+0.4 supports local processes, static host agents, host-owned locality and
+bounded retained-map replay**.
 Independent stage scaling, sharded sources, bounded streaming, fan-out/fan-in,
 and cancellation work today. Machine-based locality
 (`local_first`, `balanced`, `local_only` and their precedence) uses actual
-agent-retained payload availability. Replay/retries,
-optimized array/tensor serialization, and distributed performance measurements
+agent-retained payload availability. Optimized array/tensor serialization and distributed performance measurements
 remain follow-on work. Network execution has been tested with separate agent
 processes on one host, including a non-loopback endpoint. **Actual multi-machine
 execution evidence is still outstanding**; host aliases are not physical hosts.
@@ -151,7 +151,7 @@ to a local worker. A remote consumer agent fetches bytes directly from the
 producer agent; intermediate bytes never traverse the controller. Terminal
 outputs alone are fetched by the controller into its bounded final queue.
 Fan-out reuses the producer's serialized buffer, not one stored copy per edge.
-Protocol version 2 / `host-owned-v2` is incompatible with the earlier agents;
+Protocol version 3 / `host-owned-v3` is incompatible with the earlier agents;
 upgrade all participants together.
 
 ## Locality and required delivery
@@ -196,8 +196,8 @@ Before launching workers, each producer-machine/downstream-stage edge must
 have at least one eligible rank. An impossible `local_only` route raises
 `RunError` rather than spilling or dropping data, even for a source that might
 ultimately be empty. An agent disconnect fails the active run; it never causes
-an ineligible local-only transfer. There is no dynamic placement or recovery
-yet.
+an ineligible local-only transfer. Replacement stays on the same machine and
+rank with the same effective policy; placement does not change during recovery.
 
 Every successful output has a run-scoped logical ID and one required
 obligation for each downstream **stage**, or one final-queue obligation for
@@ -208,6 +208,55 @@ An error in one branch fails the run even if another branch finished.
 Terminal settlement means acceptance into the bounded final queue, not an
 external durable consumption acknowledgment. Completion requires all stages
 finished, no active output/edge obligations and final transfers settled.
+
+## Replay and worker replacement
+
+Map calls whose worker **crashes or exceeds its finite call deadline** are
+replayed from the retained input, on a replacement process at the same
+stage/global rank/machine. `max_retries=2` permits at most three executions of
+one logical map input on that rank. `max_retries=0` disables call replay.
+`max_worker_restarts=16` also caps total replacements per rank per run,
+including failures while idle; zero disables all replacement. Exhausting
+either budget fails explicitly with stage, rank, machine, logical input ID,
+work ID, attempt index and worker generation.
+
+The input obligation and reserved output capacity remain active across retries,
+not re-enqueued/double-reserved. A replacement initializes a fresh callable
+class/instance from the original shipped definition. **State from the failed
+worker is lost**, including user resources and any counters; already completed
+work's arbitrary effects cannot be undone. These are at-least-once attempts,
+not exactly-once external effects. User tasks must tolerate repeated execution
+or provide their own idempotency.
+
+Every replacement gets a fresh generation-scoped ZMQ identity. Results/errors
+from retired identities cannot settle current obligations. Agents retain a
+result before notifying the controller; controller acknowledgment marks an
+accepted output. Replacement removes the failed worker's *unacknowledged*
+results, while accepted outputs remain retained through all downstream
+obligations even if their producing worker dies. Losing a publication before
+acknowledgment can therefore replay the map call; a late publication from
+the old generation is discarded. Partial fan-out retry re-executes only the
+failed consuming edge, not already settled siblings. Final queue acceptance
+is still the terminal accounting boundary, not a durable delivery guarantee.
+
+Sources are **not replayable** in this version. A crash/stall of an active
+source iterator fails explicitly rather than starting an arbitrary generator
+again and silently skipping/repeating source partitions. Source exceptions,
+dependency/import/serialization failures, callable initialization errors, and
+ordinary user exceptions are contextual failures, **not retried**. A
+completed source's accepted outputs remain available after its worker exits.
+Agent/machine loss fails the whole run: the producer payload store may be gone,
+so replacement on another host cannot guarantee required inputs. Controller
+or agent restart requires resubmission; there is no durable active-run recovery.
+
+Replacement first terminates/joins the failed owned process, then starts its
+successor. Cleanup still respects item/byte credits, consumer abandonment,
+cancellation and controller leases. A blocked or crashed replacement must
+finish initialization within `worker_timeout`; initialization failure is final
+instead of an unbounded restart loop. Healthy agent connectivity and compatible
+environments remain prerequisites for replay. Retry warnings retain at most 32
+contextual failures in `status["retry_errors"]`; counters distinguish attempts,
+retries, replacements, stale messages and successfully settled logical edges.
 
 ## Execution semantics
 
@@ -251,6 +300,8 @@ in-graph batching stage. Memory for a batch is additional to runtime buffers.
 | `queue_bytes` | 256 MiB | Maximum logical input bytes queued per stage |
 | `output_bytes` | 256 MiB | Maximum buffered/reserved final payload bytes |
 | `remote_after` | 8 | Consecutive local selections before forced eligible remote selection |
+| `max_retries` | 2 | Additional attempts for one retained map input after worker crash/stall |
+| `max_worker_restarts` | 16 | Total replacements per stage rank per active run |
 
 A background controller owns its ZMQ sockets; each local worker has a
 DEALER connected via loopback TCP. The controller maintains bounded stage
@@ -321,13 +372,14 @@ transfer counters, not assignment labels alone, establish the data path.
 After failure/cancellation, controller credit/edge counters retain the last
 active snapshot for diagnosis; agent stop acknowledgments report released
 payload stores separately.
-No durable recovery is provided.
-There are **no retries in this slice**: a lost worker fails the whole run,
-even if replay might be possible. Future retries will use at-least-once
-execution, not exactly-once external side effects. Resubmitting a run can repeat
-source work and side effects. Per-worker state and source iteration are lost
-on failure; there is no checkpoint or restoration promise. Tune finite
-deadlines for your workload; a long valid call beyond its deadline fails.
+`active_attempts` lists at most 32 active initialization/call states, with
+logical input/work IDs, attempt and generation. `attempts` counts all dispatched
+calls (including source next/completion requests); `completed_work` counts
+successful logical outputs, not retries. No durable recovery is provided.
+Resubmitting a run can repeat source work and side effects. Per-worker state
+and source iteration have no checkpoint/restoration promise. Tune finite
+deadlines for your workload; a long valid map call beyond its deadline is
+terminated and may be repeated within its retry budget.
 
 Workers are trusted CPU Python processes. Cleanup owns only the controller,
 its sockets/context, and its local or agent-launched worker processes; arbitrary

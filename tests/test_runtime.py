@@ -250,7 +250,7 @@ def test_idle_worker_crash_with_an_independent_active_source():
     slow = graph.source("slow", lambda context: (time.sleep(5),))
     graph.map("idle", IdleCrash, inputs=[slow])
     graph.source("active", active)
-    with graph.run(worker_timeout=8, consumer_timeout=8) as run:
+    with graph.run(worker_timeout=8, consumer_timeout=8, max_worker_restarts=0) as run:
         wait_until(lambda: run._finished.is_set(), timeout=3)
         with pytest.raises(RunError, match="stage 'idle'.*worker exited with code 9"):
             next(run)

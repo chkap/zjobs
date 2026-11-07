@@ -151,6 +151,8 @@ class Graph:
         queue_bytes: int = 256 * 1024 * 1024,
         output_bytes: int = 256 * 1024 * 1024,
         remote_after: int = 8,
+        max_retries: int = 2,
+        max_worker_restarts: int = 16,
     ) -> Run:
         """Launch a snapshot; use the returned iterator as a context manager."""
         from .runtime import Run
@@ -169,6 +171,9 @@ class Graph:
                 raise ValueError(f"{name} must be a positive integer")
         if min(retained_bytes, queue_bytes, output_bytes) < max_payload_bytes:
             raise ValueError("byte capacities must each fit max_payload_bytes")
+        for name, value in (("max_retries", max_retries), ("max_worker_restarts", max_worker_restarts)):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"{name} must be a nonnegative integer")
         for name, value in (
             ("worker_timeout", worker_timeout), ("consumer_timeout", consumer_timeout),
             ("agent_timeout", agent_timeout),
@@ -184,4 +189,5 @@ class Graph:
             tuple(self._nodes), capacity, output_capacity, worker_timeout,
             consumer_timeout, max_payload_bytes, agents, agent_timeout,
             self._policy, retained_items, retained_bytes, queue_bytes, output_bytes, remote_after,
+            max_retries, max_worker_restarts,
         )

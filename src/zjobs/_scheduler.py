@@ -42,6 +42,10 @@ class Replica:
     work: int | None = None
     local_streak: int = 0
     exited_since: float | None = None
+    generation: int = 0
+    attempt: int = 0
+    restarts: int = 0
+    retrying: bool = False
 
 
 def choose(
@@ -86,6 +90,7 @@ def coordinate(run: Run, transport: zmq.Socket | RemoteTransport) -> None:
     final_reserved = 0
     final_reserved_bytes = 0
     recent_assignments: deque[dict] = deque(maxlen=64)
+    retired: set[bytes] = set()
 
     def release(output: Output) -> None:
         used_items[output.owner] -= 1
@@ -107,7 +112,78 @@ def coordinate(run: Run, transport: zmq.Socket | RemoteTransport) -> None:
 
     def label(replica: Replica) -> str:
         p = replica.placement
-        return f"stage {p.stage!r} rank {p.rank} work {replica.work} machine {p.machine!r}"
+        logical = replica.input.key if replica.input is not None else "source/control"
+        return (
+            f"stage {p.stage!r} rank {p.rank} work {replica.work} machine {p.machine!r} "
+            f"logical {logical} attempt {replica.attempt} generation {replica.generation}"
+        )
+
+    def replace(identity: bytes, reason: str) -> None:
+        replica = replicas[identity]
+        if not nodes[replica.stage].inputs:
+            # A completed source can keep delivering its accepted host-owned
+            # outputs after its rank exits; an active iterator cannot resume.
+            if replica.state == "done":
+                return
+            raise RunError(f"{label(replica)}: non-replayable source failure: {reason}")
+        if replica.input is not None and replica.attempt >= run._max_retries:
+            raise RunError(f"{label(replica)}: retries exhausted ({run._max_retries}): {reason}")
+        if replica.restarts >= run._max_worker_restarts:
+            raise RunError(f"{label(replica)}: worker restart budget exhausted: {reason}")
+        if replica.state == "starting":
+            raise RunError(f"{label(replica)}: initialization failure: {reason}")
+        p = replica.placement
+        if replica.input is not None:
+            replica.attempt += 1
+            replica.retrying = True
+        replica.generation += 1
+        replica.restarts += 1
+        new = f"{run._run_id}:{replica.stage}:{p.rank}:g{replica.generation}".encode()
+        if isinstance(transport, RemoteTransport):
+            pid = transport.replace(identity, {
+                "identity": new.decode(), "stage": p.stage, "source": False,
+                "rank": p.rank, "replicas": p.replicas,
+                "local_rank": p.local_rank, "local_replicas": p.local_replicas,
+            }, run._definitions[replica.stage], run._worker_timeout)
+        else:
+            assert replica.process is not None
+            try:
+                transport.send_multipart([identity, b"stop", b""], zmq.DONTWAIT)
+            except zmq.ZMQError:
+                pass
+            if replica.process.is_alive():
+                replica.process.terminate()
+            stop_processes([replica.process])
+            replica.process = None
+            process = mp.get_context("spawn").Process(
+                target=worker_main,
+                args=(endpoint, new, run._definitions[replica.stage], False, p.rank,
+                      p.replicas, run._payload_limit, p.machine, p.local_rank, p.local_replicas),
+                name=f"zjobs-{p.stage}-{p.rank}",
+            )
+            process.start()
+            replica.process = process
+            pid = process.pid
+        retired.add(identity)
+        replicas.pop(identity)
+        replicas[new] = replica
+        order[order.index(identity)] = new
+        for output in outputs.values():
+            if output.producer == identity:
+                output.producer = new
+        replica.state = "starting"
+        replica.since = time.monotonic()
+        replica.exited_since = None
+        with run._lock:
+            run._stats["worker_pids"].append(pid)
+            run._stats["workers"].append({
+                "machine": p.machine, "pid": pid, "stage": p.stage, "rank": p.rank,
+                "generation": replica.generation,
+            })
+            run._stats["worker_restarts"] += 1
+            if replica.input is not None:
+                run._stats["retries"] += 1
+            run._stats["retry_errors"] = (run._stats["retry_errors"] + [f"{label(replica)}: {reason}"])[-32:]
 
     try:
         endpoint = ""
@@ -166,7 +242,7 @@ def coordinate(run: Run, transport: zmq.Socket | RemoteTransport) -> None:
             for identity in order:
                 replica = replicas[identity]
                 output = replica.output
-                if output is None or output.published:
+                if output is None or output.published or replica.state == "starting":
                     continue
                 if downstream[replica.stage]:
                     if any(
@@ -238,7 +314,8 @@ def coordinate(run: Run, transport: zmq.Socket | RemoteTransport) -> None:
                     replica = replicas[output.producer]
                     settle(output, -1)
                     replica.output = None
-                    replica.state = "ready"
+                    if replica.state != "starting":
+                        replica.state = "ready"
                     produced[replica.placement.stage] += 1
                     transport.finals.pop(key)
                     progress = True
@@ -269,33 +346,37 @@ def coordinate(run: Run, transport: zmq.Socket | RemoteTransport) -> None:
                 replica = replicas[identity]
                 p = replica.placement
                 if replica.state in ("starting", "busy") and now - replica.since > run._worker_timeout:
-                    raise RunError(f"{label(replica)}: {replica.state} exceeded {run._worker_timeout}s")
+                    replace(identity, f"{replica.state} exceeded {run._worker_timeout}s")
+                    progress = True
+                    continue
                 if replica.process is not None and replica.process.exitcode is not None:
                     if replica.exited_since is None:
                         replica.exited_since = now
                     if not transport.poll(0) or now - replica.exited_since >= .1:
-                        raise RunError(f"{label(replica)}: worker exited with code {replica.process.exitcode}")
+                        replace(identity, f"worker exited with code {replica.process.exitcode}")
+                        progress = True
                     continue
                 if replica.state != "ready" or complete[replica.stage]:
                     continue
                 # A producer has one retained-output credit until all of its
                 # branches settle. Fast sources cannot exhaust a host with an
                 # unbounded sequence while downstream ranks are initializing.
-                if any(output.producer == identity for output in outputs.values()):
+                if not replica.retrying and any(output.producer == identity for output in outputs.values()):
                     continue
-                if (
+                if not replica.retrying and (
                     used_items[p.machine] >= run._retained_items
                     or used_bytes[p.machine] + run._payload_limit > run._retained_bytes
                 ):
                     continue
                 if nodes[replica.stage].inputs:
-                    item = choose(
-                        pending[replica.stage], p.machine, p.policy,
-                        replica.local_streak, run._remote_after,
+                    item = replica.input if replica.retrying else choose(
+                        pending[replica.stage], p.machine, p.policy, replica.local_streak, run._remote_after,
                     )
                     if item is None:
                         continue
-                    pending[replica.stage].remove(item)
+                    if not replica.retrying:
+                        pending[replica.stage].remove(item)
+                        replica.attempt = 0
                     replica.input = item
                     if isinstance(transport, RemoteTransport):
                         payload = encode({"owner": item.owner, "output": item.key})
@@ -307,27 +388,44 @@ def coordinate(run: Run, transport: zmq.Socket | RemoteTransport) -> None:
                         "output": item.key, "stage": p.stage, "rank": p.rank,
                         "owner": item.owner, "consumer": p.machine, "policy": p.policy,
                         "local": is_local, "local_streak": replica.local_streak,
+                        "attempt": replica.attempt, "generation": replica.generation,
                     })
                     command = b"task"
                 else:
                     command, payload = b"next", b""
-                used_items[p.machine] += 1
-                used_bytes[p.machine] += run._payload_limit
+                if not replica.retrying:
+                    used_items[p.machine] += 1
+                    used_bytes[p.machine] += run._payload_limit
+                replica.retrying = False
                 peak_items[p.machine] = max(peak_items[p.machine], used_items[p.machine])
                 peak_bytes[p.machine] = max(peak_bytes[p.machine], used_bytes[p.machine])
-                replica.work = work
-                work += 1
+                if replica.attempt == 0:
+                    replica.work = work
+                    work += 1
+                with run._lock:
+                    run._stats["attempts"] += 1
                 transport.send_multipart([identity, command, payload])
                 replica.state = "busy"
                 replica.since = time.monotonic()
                 progress = True
             if transport.poll(10):
                 identity, kind, payload = transport.recv_multipart()
+                if identity in retired:
+                    with run._lock:
+                        run._stats["stale_results"] += 1
+                    continue
                 replica = replicas[identity]
                 if kind == b"error":
-                    raise RunError(f"{label(replica)}: {payload.decode(errors='replace')}")
+                    reason = payload.decode(errors="replace")
+                    # Task/serialization/dependency errors are deterministic user
+                    # failures, not evidence that an execution lease was lost.
+                    if not reason.startswith("worker exited with code "):
+                        raise RunError(f"{label(replica)}: {reason}")
+                    replace(identity, reason)
+                    last_progress = now
+                    continue
                 if kind == b"ready" and replica.state == "starting":
-                    replica.state = "ready"
+                    replica.state = "output" if replica.output is not None else "ready"
                 elif kind == b"done" and replica.state == "busy" and not nodes[replica.stage].inputs:
                     replica.state = "done"
                     used_items[replica.placement.machine] -= 1
@@ -344,6 +442,8 @@ def coordinate(run: Run, transport: zmq.Socket | RemoteTransport) -> None:
                         local_payloads[key] = payload
                     if not isinstance(size, int) or not 0 <= size <= run._payload_limit:
                         raise RunError(f"{label(replica)}: received payload exceeds limit")
+                    if isinstance(transport, RemoteTransport):
+                        transport.accept(owner, key)
                     used_bytes[owner] -= run._payload_limit - size
                     if replica.input is not None:
                         with run._lock:
@@ -383,6 +483,13 @@ def coordinate(run: Run, transport: zmq.Socket | RemoteTransport) -> None:
                          "edges": [nodes[edge].name if edge >= 0 else "final" for edge in sorted(item.edges)]}
                         for item in list(outputs.values())[:32]
                     ],
+                    active_attempts=[
+                        {"stage": r.placement.stage, "rank": r.placement.rank,
+                         "machine": r.placement.machine, "work": r.work,
+                         "logical": r.input.key if r.input is not None else None,
+                         "attempt": r.attempt, "generation": r.generation, "state": r.state}
+                        for r in replicas.values() if r.state in ("starting", "busy")
+                    ][:32],
                     peak_output_buffered=max(run._stats["peak_output_buffered"], run._outputs.qsize() + final_reserved),
                     peak_output_bytes=max(run._stats["peak_output_bytes"], buffered),
                 )
@@ -403,7 +510,10 @@ def coordinate(run: Run, transport: zmq.Socket | RemoteTransport) -> None:
                     raise RunError("final consumer stalled with full item/byte buffer; consume or close the run")
             else:
                 blocked_since = None
-            if now - last_progress > run._worker_timeout:
+            if (
+                now - last_progress > run._worker_timeout
+                and not any(r.state in ("starting", "busy") for r in replicas.values())
+            ):
                 raise RunError(
                     f"routing/capacity stalled: {created - settled} required obligations; "
                     f"retained items={used_items}, bytes={used_bytes}; increase capacity or fix placement"
