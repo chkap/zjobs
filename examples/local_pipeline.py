@@ -1,30 +1,16 @@
-"""Run with: python examples/local_pipeline.py"""
-
-from zjobs import Graph, SourceContext
-
-
-def load(context: SourceContext):
-    for item in context.shard(range(25)):
-        yield {"index": item, "data": bytes([item])}
-
-
-class Preprocess:
-    def __init__(self):
-        self.processed = 0
-
-    def __call__(self, item):
-        self.processed += 1
-        return {"index": item["index"], "value": item["data"][0] ** 2}
+"""Run: python examples/local_pipeline.py"""
+from zjobs import Graph
 
 
 def main():
     graph = Graph()
-    source = graph.source("load", load, replicas=4)
-    graph.map("preprocess", Preprocess, inputs=[source], replicas=2)
-    with graph.run(capacity=8, output_capacity=4) as run:
-        for batch in run.batches(6):
+    raw = graph.source("numbers", lambda ctx: range(7))
+    squared = graph.map("square", lambda x: x * x, inputs=[raw], replicas=2)
+    graph.batch("collect", inputs=[squared], size=3)
+    with graph.run() as stream:
+        for batch in stream:
             print(batch)
-        print(run.status)
+    print(stream.status)
 
 
 if __name__ == "__main__":

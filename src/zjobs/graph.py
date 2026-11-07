@@ -1,215 +1,165 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+import hashlib
+import json
 import math
-from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, Callable, Iterable, Iterator, Mapping
+from typing import Any, Callable, Literal, Mapping, Sequence
 
-if TYPE_CHECKING:
-    from .runtime import Run
+
+@dataclass(frozen=True)
+class Locality:
+    mode: Literal["local_first", "balanced", "local_only"] = "local_first"
+    max_local_streak: int = 8
+
+    def __post_init__(self):
+        if self.mode not in ("local_first", "balanced", "local_only"):
+            raise ValueError(f"unknown locality: {self.mode}")
+        if type(self.max_local_streak) is not int or self.max_local_streak < 1:
+            raise ValueError("max_local_streak must be a positive integer")
+
+
+@dataclass(frozen=True)
+class Limits:
+    max_payload_bytes: int = 8 * 1024 * 1024
+    retained_items: int = 32
+    retained_bytes: int = 64 * 1024 * 1024
+    claim_items: int = 64
+    claim_bytes: int = 64 * 1024 * 1024
+    output_items: int = 8
+    output_bytes: int = 64 * 1024 * 1024
+    task_timeout: float = 30
+    consumer_timeout: float = 30
+    shutdown_timeout: float = 10
+    max_retries: int = 0
+
+    def __post_init__(self):
+        for name in (
+            "max_payload_bytes", "retained_items", "retained_bytes",
+            "claim_items", "claim_bytes", "output_items", "output_bytes",
+        ):
+            if type(getattr(self, name)) is not int or getattr(self, name) < 1:
+                raise ValueError(f"{name} must be a positive integer")
+        for name in ("task_timeout", "consumer_timeout", "shutdown_timeout"):
+            value = getattr(self, name)
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError(f"{name} must be finite and positive")
+        if type(self.max_retries) is not int or self.max_retries < 0:
+            raise ValueError("max_retries must be a nonnegative integer")
+        if self.retained_bytes < self.max_payload_bytes:
+            raise ValueError("retained_bytes must reserve at least max_payload_bytes")
+        if self.output_bytes < self.max_payload_bytes:
+            raise ValueError("output_bytes must admit max_payload_bytes")
+
+
+@dataclass(frozen=True)
+class PeerConfig:
+    identity: str = "local"
+    run_id: str = "standalone"
+    listen: str | None = None
+    peers: Mapping[str, str] = field(default_factory=dict)
+    join_timeout: float = 15
+    heartbeat_timeout: float = 5
+    lease_timeout: float = 5
+
+    def __post_init__(self):
+        if not self.identity or not self.run_id:
+            raise ValueError("identity and run_id must be nonempty")
+        members = dict(self.peers)
+        if members and (not self.listen or members.get(self.identity) != self.listen):
+            raise ValueError("peers must include identity with its listen endpoint")
+        if len(set(members.values())) != len(members):
+            raise ValueError("peer endpoints must be distinct")
+        if any(not k or not v.startswith("tcp://") for k, v in members.items()):
+            raise ValueError("peers require nonempty identities and tcp:// endpoints")
+        for name in ("join_timeout", "heartbeat_timeout", "lease_timeout"):
+            value = getattr(self, name)
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError(f"{name} must be finite and positive")
+        object.__setattr__(self, "peers", members)
 
 
 @dataclass(frozen=True)
 class SourceContext:
-    """Coordinates for explicitly partitioning a source across its replicas."""
-
+    peer: str
     rank: int
     replicas: int
-    machine: str = "local"
-    local_rank: int = 0
-    local_replicas: int = 1
+    members: tuple[str, ...]
 
     @property
-    def global_rank(self) -> int:
-        return self.rank
-
-    @property
-    def global_replicas(self) -> int:
-        return self.replicas
-
-    def shard(self, items: Iterable[Any]) -> Iterator[Any]:
-        """Select this rank's items; shard identifiers before expensive loading."""
-        return (item for index, item in enumerate(items) if index % self.replicas == self.rank)
+    def peer_index(self) -> int:
+        return self.members.index(self.peer)
 
 
-@dataclass(frozen=True, eq=False)
-class Node:
+@dataclass(eq=False)
+class Stage:
     name: str
-    task: Callable[..., Any]
+    kind: str
+    task: Callable[..., Any] | type | None
+    inputs: tuple[Stage, ...]
     replicas: int
-    inputs: tuple[Node, ...]
-    placement: tuple[tuple[str, int], ...] = ()
-    policy: str | None = None
-    rank_policies: tuple[tuple[int, str], ...] = ()
-    batch_size: int = 0
-    batch_bytes: int = 0
-
-
-@dataclass(frozen=True)
-class ReplicaPlacement:
-    stage: str
-    machine: str
-    rank: int
-    replicas: int
-    local_rank: int
-    local_replicas: int
-    policy: str = "local_first"
-
-
-POLICIES = frozenset(("local_first", "balanced", "local_only"))
-
-
-def validate_policy(policy: str) -> None:
-    if not isinstance(policy, str) or policy not in POLICIES:
-        raise ValueError(f"unknown locality policy {policy!r}; choose local_first, balanced or local_only")
-
-
-def _batch_list(members: list[Any]) -> list[Any]:
-    return members
+    locality: Locality | None
+    rank_locality: dict[int, Locality]
+    size: int = 1
+    max_bytes: int = 8 * 1024 * 1024
 
 
 class Graph:
-    """Build a DAG in topological order; map stages return one output per input."""
+    def __init__(self, *, locality: Locality = Locality()):
+        self.locality = locality
+        self.stages: list[Stage] = []
 
-    def __init__(self, *, policy: str = "local_first") -> None:
-        validate_policy(policy)
-        self._policy = policy
-        self._nodes: list[Node] = []
-
-    def source(
-        self, name: str, task: Callable[..., Any], *, replicas: int = 1,
-        placement: Mapping[str, int] | None = None,
-        policy: str | None = None, rank_policies: Mapping[int, str] | None = None,
-    ) -> Node:
-        """Add a callable(context) -> iterable source, invoked once per replica."""
-        return self._add(name, task, replicas, (), placement, policy, rank_policies)
-
-    def map(
-        self,
-        name: str,
-        task: Callable[..., Any],
-        *,
-        inputs: Iterable[Node],
-        replicas: int = 1,
-        placement: Mapping[str, int] | None = None,
-        policy: str | None = None, rank_policies: Mapping[int, str] | None = None,
-    ) -> Node:
-        """Add callable(item) -> item; multiple inputs interleave without ordering."""
+    def _add(self, name, kind, task, inputs, replicas, locality, rank_locality,
+             size=1, max_bytes=8 * 1024 * 1024):
+        if (not isinstance(name, str) or not name or name == "@consumer" or
+                any(s.name == name for s in self.stages)):
+            raise ValueError("stage names must be unique nonempty strings, excluding @consumer")
+        if type(replicas) is not int or replicas < 1:
+            raise ValueError("each local stage must have positive replicas")
         parents = tuple(inputs)
-        if not parents:
-            raise ValueError("map stages require at least one input")
-        if len(set(parents)) != len(parents):
-            raise ValueError("duplicate input edges are not allowed")
-        if any(parent not in self._nodes for parent in parents):
-            raise ValueError("inputs must be existing nodes of this graph")
-        return self._add(name, task, replicas, parents, placement, policy, rank_policies)
+        if len(set(parents)) != len(parents) or any(p not in self.stages for p in parents):
+            raise ValueError("inputs must be distinct stages from this graph")
+        if kind != "source" and not parents:
+            raise ValueError("downstream stages require inputs")
+        overrides = dict(rank_locality or {})
+        if any(type(r) is not int or not 0 <= r < replicas for r in overrides):
+            raise ValueError("rank locality override outside local replica range")
+        if any(not isinstance(p, Locality) for p in [self.locality, locality or self.locality,
+                                                     *overrides.values()]):
+            raise TypeError("locality policies must be Locality instances")
+        if kind != "batch" and not callable(task):
+            raise TypeError("task must be callable")
+        if type(size) is not int or size < 1 or type(max_bytes) is not int or max_bytes < 1:
+            raise ValueError("batch size and max_bytes must be positive integers")
+        stage = Stage(name, kind, task, parents, replicas, locality, overrides, size, max_bytes)
+        self.stages.append(stage)
+        return stage
 
-    def batch(
-        self, name: str, *, inputs: Iterable[Node], size: int,
-        max_bytes: int = 32 * 1024 * 1024, replicas: int = 1,
-        placement: Mapping[str, int] | None = None, policy: str | None = None,
-        rank_policies: Mapping[int, str] | None = None,
-    ) -> Node:
-        """Collect retained members into unordered lists inside the graph."""
-        for setting, value in (("size", size), ("max_bytes", max_bytes)):
-            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-                raise ValueError(f"batch {setting} must be a positive integer")
-        node = self.map(name, _batch_list, inputs=inputs, replicas=replicas, placement=placement,
-                        policy=policy, rank_policies=rank_policies)
-        batch = replace(node, batch_size=size, batch_bytes=max_bytes)
-        self._nodes[-1] = batch
-        return batch
+    def source(self, name, task, *, replicas=1, locality=None, rank_locality=None) -> Stage:
+        return self._add(name, "source", task, (), replicas, locality, rank_locality)
 
-    def _add(
-        self, name: str, task: Callable[..., Any], replicas: int, inputs: tuple[Node, ...],
-        placement: Mapping[str, int] | None,
-        policy: str | None, rank_policies: Mapping[int, str] | None,
-    ) -> Node:
-        if (
-            not isinstance(name, str)
-            or not name
-            or any(node.name == name for node in self._nodes)
-        ):
-            raise ValueError("stage names must be nonempty, unique strings")
-        if not callable(task):
-            raise TypeError(f"stage {name!r} task must be callable")
-        if isinstance(replicas, bool) or not isinstance(replicas, int) or replicas < 1:
-            raise ValueError("replicas must be a positive integer")
-        hosts: tuple[tuple[str, int], ...] = ()
-        if placement is not None:
-            if replicas != 1:
-                raise ValueError("use placement counts instead of replicas")
-            if not placement:
-                raise ValueError("placement must contain at least one machine")
-            for machine, count in placement.items():
-                if not isinstance(machine, str) or not machine:
-                    raise ValueError("machine identities must be nonempty strings")
-                if isinstance(count, bool) or not isinstance(count, int) or count < 1:
-                    raise ValueError("placement counts must be positive integers")
-            hosts = tuple(sorted(placement.items()))
-            replicas = sum(count for _, count in hosts)
-        if policy is not None:
-            validate_policy(policy)
-        overrides = dict(rank_policies or {})
-        for rank, value in overrides.items():
-            if isinstance(rank, bool) or not isinstance(rank, int) or not 0 <= rank < replicas:
-                raise ValueError("rank policy indices must be global stage ranks")
-            validate_policy(value)
-        node = Node(name, task, replicas, inputs, hosts, policy, tuple(sorted(overrides.items())))
-        self._nodes.append(node)
-        return node
+    def map(self, name, task, *, inputs: Sequence[Stage], replicas=1,
+            locality=None, rank_locality=None) -> Stage:
+        return self._add(name, "map", task, inputs, replicas, locality, rank_locality)
 
-    def run(
-        self,
-        *,
-        capacity: int = 16,
-        output_capacity: int = 16,
-        worker_timeout: float = 30.0,
-        consumer_timeout: float = 30.0,
-        max_payload_bytes: int = 64 * 1024 * 1024,
-        agents: Mapping[str, str] | None = None,
-        agent_timeout: float = 3.0,
-        retained_items: int = 128,
-        retained_bytes: int = 1024 * 1024 * 1024,
-        queue_bytes: int = 256 * 1024 * 1024,
-        output_bytes: int = 256 * 1024 * 1024,
-        remote_after: int = 8,
-        max_retries: int = 2,
-        max_worker_restarts: int = 16,
-    ) -> Run:
-        """Launch a snapshot; use the returned iterator as a context manager."""
+    def batch(self, name, *, inputs: Sequence[Stage], size: int,
+              max_bytes=8 * 1024 * 1024, replicas=1, locality=None,
+              rank_locality=None) -> Stage:
+        return self._add(name, "batch", None, inputs, replicas, locality, rank_locality,
+                         size, max_bytes)
+
+    def policy(self, stage: Stage, rank: int) -> Locality:
+        return stage.rank_locality.get(rank, stage.locality or self.locality)
+
+    def fingerprint(self) -> str:
+        # Callable equivalence and local replica counts are deployment concerns,
+        # not bytecode equality: cloudpickle captures machine-specific state.
+        shape = [(s.name, s.kind, [p.name for p in s.inputs], s.size, s.max_bytes)
+                 for s in self.stages]
+        return hashlib.sha256(json.dumps(shape, sort_keys=True).encode()).hexdigest()
+
+    def run(self, *, peer: PeerConfig | None = None, limits: Limits | None = None):
         from .runtime import Run
-
-        if not self._nodes:
-            raise ValueError("a graph must have at least one source")
-        for name, value in (
-            ("capacity", capacity),
-            ("output_capacity", output_capacity),
-            ("max_payload_bytes", max_payload_bytes),
-            ("retained_items", retained_items), ("retained_bytes", retained_bytes),
-            ("queue_bytes", queue_bytes), ("output_bytes", output_bytes),
-            ("remote_after", remote_after),
-        ):
-            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-                raise ValueError(f"{name} must be a positive integer")
-        if min(retained_bytes, queue_bytes, output_bytes) < max_payload_bytes:
-            raise ValueError("byte capacities must each fit max_payload_bytes")
-        for name, value in (("max_retries", max_retries), ("max_worker_restarts", max_worker_restarts)):
-            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-                raise ValueError(f"{name} must be a nonnegative integer")
-        for name, value in (
-            ("worker_timeout", worker_timeout), ("consumer_timeout", consumer_timeout),
-            ("agent_timeout", agent_timeout),
-        ):
-            if (
-                isinstance(value, bool)
-                or not isinstance(value, (int, float))
-                or not math.isfinite(value)
-                or value <= 0
-            ):
-                raise ValueError(f"{name} must be finite and positive")
-        return Run(
-            tuple(self._nodes), capacity, output_capacity, worker_timeout,
-            consumer_timeout, max_payload_bytes, agents, agent_timeout,
-            self._policy, retained_items, retained_bytes, queue_bytes, output_bytes, remote_after,
-            max_retries, max_worker_restarts,
-        )
+        if not self.stages:
+            raise ValueError("cannot run an empty graph")
+        return Run(self, peer or PeerConfig(), limits or Limits())
