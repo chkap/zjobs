@@ -11,13 +11,11 @@ import cloudpickle
 import zmq
 
 from .graph import SourceContext
+from ._payload import Payload, dumps, loads, load_group
 
 
-def _encode(value: Any, limit: int) -> bytes:
-    payload = cloudpickle.dumps(value, protocol=5)
-    if len(payload) > limit:
-        raise ValueError(f"serialized payload is {len(payload)} bytes; limit is {limit}")
-    return payload
+def _encode(value: Any, limit: int) -> Payload:
+    return dumps(value, limit)
 
 
 def worker_main(
@@ -72,16 +70,16 @@ def worker_main(
                     continue
             elif command == b"task" and not source:
                 operation = "deserialize input"
-                value = cloudpickle.loads(payload)
+                value = loads(frames[1:])
                 operation = "execute task"
                 value = task(value)
             elif command == b"batch" and not source:
                 operation = "deserialize batch members"
-                value = [cloudpickle.loads(member) for member in frames[1:]]
+                value = load_group(frames[1:])
             else:
                 raise RuntimeError(f"unexpected worker command {command!r}")
             operation = "serialize output"
-            socket.send_multipart([b"item", _encode(value, payload_limit)])
+            socket.send_multipart([b"item", *_encode(value, payload_limit)])
     except BaseException:
         error = f"{operation}:\n{traceback.format_exc()[-32700:]}".encode("utf-8", errors="replace")
         try:

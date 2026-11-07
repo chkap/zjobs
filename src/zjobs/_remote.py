@@ -7,6 +7,7 @@ from collections import deque
 import zmq
 
 from ._protocol import capabilities, configure, decode, encode
+from ._payload import Payload
 
 
 class RemoteError(RuntimeError):
@@ -37,7 +38,7 @@ class RemoteTransport:
         self.hello: dict[str, dict] = {}
         self.last_sent = 0.0
         self.agent_stats: dict[str, dict] = {}
-        self.finals: dict[str, bytes] = {}
+        self.finals: dict[str, Payload] = {}
         self.endpoints = endpoints.copy()
         try:
             for machine, endpoint in endpoints.items():
@@ -102,9 +103,9 @@ class RemoteTransport:
                 if kind == "stopped":
                     self.agent_stats[machine] = message
             elif kind == "final":
-                if len(frames) != 2:
+                if len(frames) < 3:
                     raise RemoteError(f"agent {machine!r}: invalid final payload")
-                self.finals[message["output"]] = frames[1]
+                self.finals[message["output"]] = tuple(frames[1:])
             elif kind == "heartbeat":
                 if "transfers" in message:
                     self.agent_stats[machine] = message
