@@ -6,8 +6,9 @@ bounded replay, independently placed batching and framed large payloads**.
 Independent stage scaling, sharded sources, bounded streaming, fan-out/fan-in,
 and cancellation work today. Machine-based locality
 (`local_first`, `balanced`, `local_only` and their precedence) uses actual
-agent-retained payload availability. Application scaling/examples remain
-follow-on work. Network execution has been tested with separate agent
+agent-retained payload availability. Practical file-loading/optional CPU tensor
+examples and reproducible one-host application measurements are included.
+Network execution has been tested with separate agent
 processes on one host, including a non-loopback endpoint. **Actual multi-machine
 execution evidence is still outstanding**; host aliases are not physical hosts.
 
@@ -24,6 +25,179 @@ python examples/local_pipeline.py
 
 The core depends only on cloudpickle and pyzmq, not NumPy, torch, or GPUs.
 For development: `python -m pip install -e '.[test]'` then `python -m pytest`.
+For the minimal graph API, see [Python task definitions](#python-task-definitions).
+
+## Practical file-loading pipeline
+
+```sh
+# Generates temporary deterministic binary files and verifies all final results:
+python examples/loading_pipeline.py
+# Use your own numbered files 000000.bin ... 000031.bin:
+python examples/loading_pipeline.py --data-dir /absolute/path/corpus --items 32 \
+  --io-ranks 2 --preprocess-ranks 4 --collect-ranks 1 --batch-size 4
+```
+
+The stdlib-only example reads real files, derives a CPU PBKDF2 digest in
+`Preprocess`, retains the original bytes for consumption, collects bounded
+lists **inside the graph**, and checks every ID, digest and original-data hash.
+`FileSource` shards cheap file IDs via `SourceContext.shard` **before reading**;
+it does not make each replica load the whole corpus. Replace
+`Preprocess.__call__` with your own decoding/normalization/transformation.
+PBKDF2 is a deterministic CPU-heavy application probe, not a claim that every
+data loader needs cryptographic preprocessing. `--rounds` controls its cost.
+Missing/unreadable files fail with contextual source errors.
+
+Stage counts are independent: `--io-ranks`, `--preprocess-ranks`,
+`--collect-ranks` mean total processes in local mode, **per-machine** counts
+with agents. For example, eight IO ranks on each of eight named agents means
+64 sharded IO workers; preprocessing/collection counts can differ. The example
+places each stage on all supplied agents; edit `build_graph`'s stage placement
+maps for asymmetric deployment. Global sharding guarantees each ID is read
+once, even if several hosts see the same corpus.
+
+For actual separate hosts, install compatible zjobs on each, copy this corpus
+to the **same absolute path on every agent and controller**, and start the
+static agents as described below. Files are not automatically shipped:
+
+```sh
+# On controller AND each participating host (same args/path), or copy your files:
+python examples/loading_pipeline.py --data-dir /tmp/zjobs-corpus \
+  --generate-only --items 48 --kib 256
+# Controller; agents must reach each other and the corpus must already exist:
+python examples/loading_pipeline.py --data-dir /tmp/zjobs-corpus --items 48 \
+  --agent host-a=tcp://host-a.example:5555 --agent host-b=tcp://host-b.example:5555 \
+  --io-ranks 2 --preprocess-ranks 1 --collect-ranks 1 --policy local_first
+```
+
+`--generate` overwrites the specified numbered fixture files; use a dedicated
+corpus directory, not valuable input data. Without `--data-dir`, local examples
+create/clean their own temporary corpus. Remote execution requires an explicit
+path rather than silently generating files only on the controller.
+Final batches can be partial and unordered, especially with parallel collectors.
+Consumption streams one batch at a time; the example retains only bounded
+runtime buffers plus per-input verification metadata, not all payloads.
+JSON includes exact counts/checksum, source sharding counts, raw trial times,
+first-batch latency, stage service times, placement, byte/item peaks and
+agent-observed actual local/remote payload deliveries. Core execution needs
+neither NumPy nor torch.
+
+For eight actual hosts, start one appropriately named agent per host and
+repeat `--agent host-N=tcp://host-N.example:5555` for N=1..8, with
+`--io-ranks 8 --preprocess-ranks 2 --collect-ranks 1`. This expresses 64 IO,
+16 preprocessing and eight collection workers. Copy/generate the same corpus
+on every agent host and the controller first (the controller can share an agent
+host); the controller also reads it for verification. These are deployment instructions, not evidence that eight
+machines were available or tested.
+
+### Optional CPU IterableDataset
+
+Install CPU torch using the instructions for your platform from
+<https://pytorch.org/get-started/locally/>; it is not a core dependency:
+
+```sh
+python examples/torch_dataset.py --items 11 --kib 64
+python examples/torch_dataset.py --items 64 --stop-after 1
+# Optional existing-corpus/static-agent variant:
+python examples/torch_dataset.py --data-dir /tmp/zjobs-corpus --items 48 --kib 256 \
+  --agent host-a=tcp://host-a.example:5555 --agent host-b=tcp://host-b.example:5555
+```
+
+`LoadingDataset` wraps a run with `try/finally` and yields already-collected
+batches of IDs, digests and normalized CPU float32 feature vectors from the
+binary file bytes. `--kib` must match the existing corpus's uniform file size.
+The script verifies every feature vector against its file; full consumption
+also checks exact IDs. Unequal file sizes require a user-specific padding or
+ragged representation rather than `torch.stack`.
+
+Use the dataset as a context manager, particularly when breaking early:
+
+```python
+# From examples/ (or add it to your script's import path):
+from torch.utils.data import DataLoader
+from torch_dataset import LoadingDataset
+
+with LoadingDataset(directory, count=48, payload_bytes=256 * 1024) as dataset:
+    loader = DataLoader(dataset, batch_size=None, num_workers=0, pin_memory=False)
+    for batch in loader:
+        use(batch["features"])  # CPU only; zjobs already supplied stage workers
+        if enough():
+            break
+# Dataset context closes the run even if loader/iterator remain referenced.
+```
+
+**Supported configuration:** `num_workers=0`, `batch_size=None` (preserves
+in-graph full/partial batches), no concurrent iterators on one dataset, one
+active run per static agent. The adapter rejects DataLoader worker processes
+before launching zjobs: nested/daemon multiprocessing and duplicating runs on
+busy agents are not supported. A closed dataset cannot be reused; create a new
+instance. `close()` is idempotent and owns the run's shutdown; do not rely on
+DataLoader iterator garbage collection for early cleanup. Consumer-created
+tensors and batches retained by user code are outside runtime byte credits.
+Without torch, the core/file example still works and this optional script
+exits with explicit installation guidance.
+
+### Reproducible application scaling and locality
+
+```sh
+# Local rank comparison plus two simulated agents on a bindable local IP:
+python examples/measure_application.py --network-host 10.0.0.4 \
+  --output application.json
+# Local-only, or independently started actual hosts with copied corpus:
+python examples/measure_application.py --output local.json
+python examples/measure_application.py --data-dir /tmp/zjobs-corpus --items 48 \
+  --agent host-a=tcp://host-a.example:5555 --agent host-b=tcp://host-b.example:5555 \
+  --output external-hosts.json
+```
+
+The runner compares local preprocessing counts 1/2/4 (IO=2, collection=1) and,
+if agents are supplied, `local_first` versus `balanced` with one rank per stage
+per agent. Configuration and environment, one full warmup plus three raw
+measured trials, exact checksum, placement, service times, queue/retained/final
+item and byte peaks and actual payload transfer counters are persisted as JSON.
+Timings include fresh worker startup, file IO, preprocessing, serialization,
+collection, verification and cleanup. Fixture generation, independent expected
+digest computation and agent startup are excluded. Expected-data verification
+and warmups prime the OS file cache; **these are not cold-disk IO measurements**.
+Worker processes still restart each run, so warmup does not remove all startup
+cost. Stage service seconds sum time around file reads and PBKDF2 across all
+items; they exclude shipping/scheduling/collection and are not end-to-end
+utilization percentages.
+
+Committed raw evidence: [`examples/results/application-one-host.json`](examples/results/application-one-host.json).
+One Linux host, Python 3.12.3/cloudpickle 3.1.2/pyzmq 27.3.0, two available CPU
+affinity slots; 48 actual 256 KiB files (12 MiB), 200,000 PBKDF2 iterations per
+record, graph batches of four. All warmups/trials verified checksum
+`898234e42086af903f5bed913493f652b2358416a92ca710e6949970f05aec6d` and every
+payload byte hash, settled all obligations and cleaned owned workers/stores:
+
+| Configuration | Raw elapsed seconds | Median items/s | Actual remote logical payload bytes per trial |
+| --- | --- | --- | --- |
+| local preprocessing=1 | 1.888, 1.809, 1.822 | 26.34 | 0, 0, 0 |
+| local preprocessing=2 | 1.648, 1.619, 1.623 | 29.57 | 0, 0, 0 |
+| local preprocessing=4 | 1.769, 1.791, 1.810 | 26.80 | 0, 0, 0 |
+| agents, local_first | 1.631, 1.643, 1.646 | 29.22 | 0, 262419, 262419 |
+| agents, balanced | 1.776, 1.967, 1.639 | 27.03 | 6560475, 6297636, 19674705 |
+
+Two preprocessing ranks give a measured **1.12x** median improvement over one;
+four add startup without further benefit on this machine. Only two IO producers
+feed this comparison: their one-retained-output credits also cap useful
+simultaneous preprocessing calls at two. Raising preprocessing alone cannot
+remove that upstream bound. Read
+service totaled about 0.005 seconds per run while preprocessing consumed
+1.58–1.60 CPU-seconds with one rank and 2.47–2.51 CPU-seconds with two.
+Measured per-item CPU cost increased with parallelism, so neither linear
+scaling nor a specific hardware bottleneck is inferred. CPU work/startup,
+not cached IO, dominates this controlled workload. Local-first avoids most
+peer traffic; balanced's timing/transfer mix varies with ready-rank scheduling.
+Agent-observed received bytes exactly matched successful remote-byte accounting
+in every trial; final delivery to the controller still occurs with either
+policy. Bounds and raw peaks are in the JSON, not an RSS/zero-copy claim.
+These are useful measurements of this application/configuration, **not a
+universal speedup or real multi-machine proof**. Host aliases/non-loopback TCP
+used one physical machine. Actual distinct-host/eight-machine demonstration
+and independent integrated final acceptance remain outstanding.
+
+## Python task definitions
 
 ```python
 from zjobs import Graph

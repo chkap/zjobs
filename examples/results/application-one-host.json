@@ -1,0 +1,2720 @@
+{
+  "environment": {
+    "python": "3.12.3",
+    "platform": "Linux-7.0.0-1017-azure-x86_64-with-glibc2.39",
+    "cpu_affinity_count": 2,
+    "versions": {
+      "zjobs": "0.6.0",
+      "cloudpickle": "3.1.2",
+      "pyzmq": "27.3.0"
+    }
+  },
+  "config": {
+    "data_dir": "/tmp/zjobs-application-hjlshawt/data",
+    "items": 48,
+    "kib": 256,
+    "rounds": 200000,
+    "batch_size": 4,
+    "preprocess_ranks": [
+      1,
+      2,
+      4
+    ],
+    "warmup": 1,
+    "trials": 3,
+    "network_host": "10.0.0.4",
+    "agent": [],
+    "output": "examples/results/application-one-host.json"
+  },
+  "expected_checksum": "898234e42086af903f5bed913493f652b2358416a92ca710e6949970f05aec6d",
+  "agents": {
+    "a": "tcp://10.0.0.4:40183",
+    "b": "tcp://10.0.0.4:56929"
+  },
+  "physical_hosts": 1,
+  "physical_host_evidence": "one physical host only",
+  "results": [
+    {
+      "mode": "local",
+      "policy": "local_first",
+      "io_ranks": 2,
+      "preprocess_ranks": 1,
+      "collect_ranks": 1,
+      "rank_counts": "local totals",
+      "warmups": [
+        {
+          "elapsed_seconds": 1.9797272130381316,
+          "items_per_second": 24.24576461033648,
+          "time_to_first_batch_seconds": 0.30912129604257643,
+          "items": 48,
+          "checksum": "898234e42086af903f5bed913493f652b2358416a92ca710e6949970f05aec6d",
+          "source_items": {
+            "local:0": 24,
+            "local:1": 24
+          },
+          "batch_length_counts": {
+            "4": 12
+          },
+          "service": {
+            "read_seconds": 0.005273283226415515,
+            "read_cpu_seconds": 0.0052602849999999896,
+            "preprocess_seconds": 1.7247820200864226,
+            "preprocess_cpu_seconds": 1.7203183779999995
+          },
+          "placement": [
+            {
+              "stage": "io",
+              "machine": "local",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 2,
+              "policy": "local_first"
+            },
+            {
+              "stage": "io",
+              "machine": "local",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 1,
+              "local_replicas": 2,
+              "policy": "local_first"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "local",
+              "rank": 0,
+              "replicas": 1,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            },
+            {
+              "stage": "collect",
+              "machine": "local",
+              "rank": 0,
+              "replicas": 1,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            }
+          ],
+          "run_options": {
+            "max_payload_bytes": 1060864,
+            "retained_items": 64,
+            "retained_bytes": 67108864,
+            "queue_bytes": 8486912,
+            "output_bytes": 4243456,
+            "capacity": 16,
+            "output_capacity": 4
+          },
+          "state": "completed",
+          "obligations_created": 108,
+          "obligations_settled": 108,
+          "local_items": 96,
+          "remote_items": 0,
+          "local_bytes": 25185888,
+          "remote_bytes": 0,
+          "final_bytes": 0,
+          "agents": {},
+          "peak_queue_items": {
+            "io": 0,
+            "preprocess": 1,
+            "collect": 1
+          },
+          "peak_queue_bytes": {
+            "io": 0,
+            "preprocess": 262283,
+            "collect": 262423
+          },
+          "peak_retained_items": {
+            "local": 8
+          },
+          "peak_retained_bytes": {
+            "local": 4494567
+          },
+          "peak_output_items": 1,
+          "peak_output_bytes": 1049657,
+          "worker_pids": [
+            1603075,
+            1603076,
+            1603077,
+            1603078
+          ]
+        }
+      ],
+      "trials": [
+        {
+          "elapsed_seconds": 1.8878731362055987,
+          "items_per_second": 25.425437270893273,
+          "time_to_first_batch_seconds": 0.29327592602930963,
+          "items": 48,
+          "checksum": "898234e42086af903f5bed913493f652b2358416a92ca710e6949970f05aec6d",
+          "source_items": {
+            "local:0": 24,
+            "local:1": 24
+          },
+          "batch_length_counts": {
+            "4": 12
+          },
+          "service": {
+            "read_seconds": 0.005563190905377269,
+            "read_cpu_seconds": 0.0052780629999999995,
+            "preprocess_seconds": 1.6046764650382102,
+            "preprocess_cpu_seconds": 1.597783191
+          },
+          "placement": [
+            {
+              "stage": "io",
+              "machine": "local",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 2,
+              "policy": "local_first"
+            },
+            {
+              "stage": "io",
+              "machine": "local",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 1,
+              "local_replicas": 2,
+              "policy": "local_first"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "local",
+              "rank": 0,
+              "replicas": 1,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            },
+            {
+              "stage": "collect",
+              "machine": "local",
+              "rank": 0,
+              "replicas": 1,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            }
+          ],
+          "run_options": {
+            "max_payload_bytes": 1060864,
+            "retained_items": 64,
+            "retained_bytes": 67108864,
+            "queue_bytes": 8486912,
+            "output_bytes": 4243456,
+            "capacity": 16,
+            "output_capacity": 4
+          },
+          "state": "completed",
+          "obligations_created": 108,
+          "obligations_settled": 108,
+          "local_items": 96,
+          "remote_items": 0,
+          "local_bytes": 25185888,
+          "remote_bytes": 0,
+          "final_bytes": 0,
+          "agents": {},
+          "peak_queue_items": {
+            "io": 0,
+            "preprocess": 2,
+            "collect": 1
+          },
+          "peak_queue_bytes": {
+            "io": 0,
+            "preprocess": 524566,
+            "collect": 262423
+          },
+          "peak_retained_items": {
+            "local": 8
+          },
+          "peak_retained_bytes": {
+            "local": 4494567
+          },
+          "peak_output_items": 1,
+          "peak_output_bytes": 1049657,
+          "worker_pids": [
+            1603119,
+            1603120,
+            1603121,
+            1603122
+          ]
+        },
+        {
+          "elapsed_seconds": 1.8087909200694412,
+          "items_per_second": 26.53706377415762,
+          "time_to_first_batch_seconds": 0.2837497000582516,
+          "items": 48,
+          "checksum": "898234e42086af903f5bed913493f652b2358416a92ca710e6949970f05aec6d",
+          "source_items": {
+            "local:1": 24,
+            "local:0": 24
+          },
+          "batch_length_counts": {
+            "4": 12
+          },
+          "service": {
+            "read_seconds": 0.004900601925328374,
+            "read_cpu_seconds": 0.004830594999999979,
+            "preprocess_seconds": 1.578623458277434,
+            "preprocess_cpu_seconds": 1.5762592589999993
+          },
+          "placement": [
+            {
+              "stage": "io",
+              "machine": "local",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 2,
+              "policy": "local_first"
+            },
+            {
+              "stage": "io",
+              "machine": "local",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 1,
+              "local_replicas": 2,
+              "policy": "local_first"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "local",
+              "rank": 0,
+              "replicas": 1,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            },
+            {
+              "stage": "collect",
+              "machine": "local",
+              "rank": 0,
+              "replicas": 1,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            }
+          ],
+          "run_options": {
+            "max_payload_bytes": 1060864,
+            "retained_items": 64,
+            "retained_bytes": 67108864,
+            "queue_bytes": 8486912,
+            "output_bytes": 4243456,
+            "capacity": 16,
+            "output_capacity": 4
+          },
+          "state": "completed",
+          "obligations_created": 108,
+          "obligations_settled": 108,
+          "local_items": 96,
+          "remote_items": 0,
+          "local_bytes": 25185888,
+          "remote_bytes": 0,
+          "final_bytes": 0,
+          "agents": {},
+          "peak_queue_items": {
+            "io": 0,
+            "preprocess": 2,
+            "collect": 1
+          },
+          "peak_queue_bytes": {
+            "io": 0,
+            "preprocess": 524566,
+            "collect": 262423
+          },
+          "peak_retained_items": {
+            "local": 8
+          },
+          "peak_retained_bytes": {
+            "local": 4494567
+          },
+          "peak_output_items": 1,
+          "peak_output_bytes": 1049657,
+          "worker_pids": [
+            1603156,
+            1603157,
+            1603158,
+            1603159
+          ]
+        },
+        {
+          "elapsed_seconds": 1.8223063820041716,
+          "items_per_second": 26.340246883847065,
+          "time_to_first_batch_seconds": 0.2852092089597136,
+          "items": 48,
+          "checksum": "898234e42086af903f5bed913493f652b2358416a92ca710e6949970f05aec6d",
+          "source_items": {
+            "local:0": 24,
+            "local:1": 24
+          },
+          "batch_length_counts": {
+            "4": 12
+          },
+          "service": {
+            "read_seconds": 0.005326989106833935,
+            "read_cpu_seconds": 0.0051261770000000095,
+            "preprocess_seconds": 1.587601874023676,
+            "preprocess_cpu_seconds": 1.5845760309999992
+          },
+          "placement": [
+            {
+              "stage": "io",
+              "machine": "local",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 2,
+              "policy": "local_first"
+            },
+            {
+              "stage": "io",
+              "machine": "local",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 1,
+              "local_replicas": 2,
+              "policy": "local_first"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "local",
+              "rank": 0,
+              "replicas": 1,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            },
+            {
+              "stage": "collect",
+              "machine": "local",
+              "rank": 0,
+              "replicas": 1,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            }
+          ],
+          "run_options": {
+            "max_payload_bytes": 1060864,
+            "retained_items": 64,
+            "retained_bytes": 67108864,
+            "queue_bytes": 8486912,
+            "output_bytes": 4243456,
+            "capacity": 16,
+            "output_capacity": 4
+          },
+          "state": "completed",
+          "obligations_created": 108,
+          "obligations_settled": 108,
+          "local_items": 96,
+          "remote_items": 0,
+          "local_bytes": 25185888,
+          "remote_bytes": 0,
+          "final_bytes": 0,
+          "agents": {},
+          "peak_queue_items": {
+            "io": 0,
+            "preprocess": 2,
+            "collect": 1
+          },
+          "peak_queue_bytes": {
+            "io": 0,
+            "preprocess": 524566,
+            "collect": 262423
+          },
+          "peak_retained_items": {
+            "local": 8
+          },
+          "peak_retained_bytes": {
+            "local": 4494567
+          },
+          "peak_output_items": 1,
+          "peak_output_bytes": 1049657,
+          "worker_pids": [
+            1603172,
+            1603173,
+            1603174,
+            1603175
+          ]
+        }
+      ],
+      "median_elapsed_seconds": 1.8223063820041716,
+      "median_items_per_second": 26.340246883847065
+    },
+    {
+      "mode": "local",
+      "policy": "local_first",
+      "io_ranks": 2,
+      "preprocess_ranks": 2,
+      "collect_ranks": 1,
+      "rank_counts": "local totals",
+      "warmups": [
+        {
+          "elapsed_seconds": 1.7108380221761763,
+          "items_per_second": 28.056425785384562,
+          "time_to_first_batch_seconds": 0.31255065207369626,
+          "items": 48,
+          "checksum": "898234e42086af903f5bed913493f652b2358416a92ca710e6949970f05aec6d",
+          "source_items": {
+            "local:0": 24,
+            "local:1": 24
+          },
+          "batch_length_counts": {
+            "4": 12
+          },
+          "service": {
+            "read_seconds": 0.0052812842186540365,
+            "read_cpu_seconds": 0.005236954000000044,
+            "preprocess_seconds": 2.6038112780079246,
+            "preprocess_cpu_seconds": 2.5027264589999993
+          },
+          "placement": [
+            {
+              "stage": "io",
+              "machine": "local",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 2,
+              "policy": "local_first"
+            },
+            {
+              "stage": "io",
+              "machine": "local",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 1,
+              "local_replicas": 2,
+              "policy": "local_first"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "local",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 2,
+              "policy": "local_first"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "local",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 1,
+              "local_replicas": 2,
+              "policy": "local_first"
+            },
+            {
+              "stage": "collect",
+              "machine": "local",
+              "rank": 0,
+              "replicas": 1,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            }
+          ],
+          "run_options": {
+            "max_payload_bytes": 1060864,
+            "retained_items": 64,
+            "retained_bytes": 67108864,
+            "queue_bytes": 8486912,
+            "output_bytes": 4243456,
+            "capacity": 16,
+            "output_capacity": 4
+          },
+          "state": "completed",
+          "obligations_created": 108,
+          "obligations_settled": 108,
+          "local_items": 96,
+          "remote_items": 0,
+          "local_bytes": 25185888,
+          "remote_bytes": 0,
+          "final_bytes": 0,
+          "agents": {},
+          "peak_queue_items": {
+            "io": 0,
+            "preprocess": 1,
+            "collect": 1
+          },
+          "peak_queue_bytes": {
+            "io": 0,
+            "preprocess": 262283,
+            "collect": 262423
+          },
+          "peak_retained_items": {
+            "local": 9
+          },
+          "peak_retained_bytes": {
+            "local": 4756850
+          },
+          "peak_output_items": 1,
+          "peak_output_bytes": 1049657,
+          "worker_pids": [
+            1603187,
+            1603188,
+            1603189,
+            1603190,
+            1603191
+          ]
+        }
+      ],
+      "trials": [
+        {
+          "elapsed_seconds": 1.6476708021946251,
+          "items_per_second": 29.13203288913423,
+          "time_to_first_batch_seconds": 0.30643177404999733,
+          "items": 48,
+          "checksum": "898234e42086af903f5bed913493f652b2358416a92ca710e6949970f05aec6d",
+          "source_items": {
+            "local:0": 24,
+            "local:1": 24
+          },
+          "batch_length_counts": {
+            "4": 12
+          },
+          "service": {
+            "read_seconds": 0.0048467605374753475,
+            "read_cpu_seconds": 0.004817702999999979,
+            "preprocess_seconds": 2.581250162795186,
+            "preprocess_cpu_seconds": 2.514371196
+          },
+          "placement": [
+            {
+              "stage": "io",
+              "machine": "local",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 2,
+              "policy": "local_first"
+            },
+            {
+              "stage": "io",
+              "machine": "local",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 1,
+              "local_replicas": 2,
+              "policy": "local_first"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "local",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 2,
+              "policy": "local_first"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "local",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 1,
+              "local_replicas": 2,
+              "policy": "local_first"
+            },
+            {
+              "stage": "collect",
+              "machine": "local",
+              "rank": 0,
+              "replicas": 1,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            }
+          ],
+          "run_options": {
+            "max_payload_bytes": 1060864,
+            "retained_items": 64,
+            "retained_bytes": 67108864,
+            "queue_bytes": 8486912,
+            "output_bytes": 4243456,
+            "capacity": 16,
+            "output_capacity": 4
+          },
+          "state": "completed",
+          "obligations_created": 108,
+          "obligations_settled": 108,
+          "local_items": 96,
+          "remote_items": 0,
+          "local_bytes": 25185888,
+          "remote_bytes": 0,
+          "final_bytes": 0,
+          "agents": {},
+          "peak_queue_items": {
+            "io": 0,
+            "preprocess": 1,
+            "collect": 1
+          },
+          "peak_queue_bytes": {
+            "io": 0,
+            "preprocess": 262283,
+            "collect": 262423
+          },
+          "peak_retained_items": {
+            "local": 9
+          },
+          "peak_retained_bytes": {
+            "local": 4756850
+          },
+          "peak_output_items": 1,
+          "peak_output_bytes": 1049657,
+          "worker_pids": [
+            1603230,
+            1603231,
+            1603232,
+            1603233,
+            1603234
+          ]
+        },
+        {
+          "elapsed_seconds": 1.6193872559815645,
+          "items_per_second": 29.640840893801897,
+          "time_to_first_batch_seconds": 0.3089674371294677,
+          "items": 48,
+          "checksum": "898234e42086af903f5bed913493f652b2358416a92ca710e6949970f05aec6d",
+          "source_items": {
+            "local:0": 24,
+            "local:1": 24
+          },
+          "batch_length_counts": {
+            "4": 12
+          },
+          "service": {
+            "read_seconds": 0.004896129248663783,
+            "read_cpu_seconds": 0.004887191000000055,
+            "preprocess_seconds": 2.5298600727692246,
+            "preprocess_cpu_seconds": 2.4750034579999998
+          },
+          "placement": [
+            {
+              "stage": "io",
+              "machine": "local",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 2,
+              "policy": "local_first"
+            },
+            {
+              "stage": "io",
+              "machine": "local",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 1,
+              "local_replicas": 2,
+              "policy": "local_first"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "local",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 2,
+              "policy": "local_first"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "local",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 1,
+              "local_replicas": 2,
+              "policy": "local_first"
+            },
+            {
+              "stage": "collect",
+              "machine": "local",
+              "rank": 0,
+              "replicas": 1,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            }
+          ],
+          "run_options": {
+            "max_payload_bytes": 1060864,
+            "retained_items": 64,
+            "retained_bytes": 67108864,
+            "queue_bytes": 8486912,
+            "output_bytes": 4243456,
+            "capacity": 16,
+            "output_capacity": 4
+          },
+          "state": "completed",
+          "obligations_created": 108,
+          "obligations_settled": 108,
+          "local_items": 96,
+          "remote_items": 0,
+          "local_bytes": 25185888,
+          "remote_bytes": 0,
+          "final_bytes": 0,
+          "agents": {},
+          "peak_queue_items": {
+            "io": 0,
+            "preprocess": 1,
+            "collect": 1
+          },
+          "peak_queue_bytes": {
+            "io": 0,
+            "preprocess": 262283,
+            "collect": 262423
+          },
+          "peak_retained_items": {
+            "local": 9
+          },
+          "peak_retained_bytes": {
+            "local": 4756850
+          },
+          "peak_output_items": 1,
+          "peak_output_bytes": 1049657,
+          "worker_pids": [
+            1603249,
+            1603250,
+            1603251,
+            1603252,
+            1603253
+          ]
+        },
+        {
+          "elapsed_seconds": 1.6233764328062534,
+          "items_per_second": 29.568003471027783,
+          "time_to_first_batch_seconds": 0.3096594619564712,
+          "items": 48,
+          "checksum": "898234e42086af903f5bed913493f652b2358416a92ca710e6949970f05aec6d",
+          "source_items": {
+            "local:0": 24,
+            "local:1": 24
+          },
+          "batch_length_counts": {
+            "4": 12
+          },
+          "service": {
+            "read_seconds": 0.0048075595404952765,
+            "read_cpu_seconds": 0.004799450999999982,
+            "preprocess_seconds": 2.547509503317997,
+            "preprocess_cpu_seconds": 2.483732976000001
+          },
+          "placement": [
+            {
+              "stage": "io",
+              "machine": "local",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 2,
+              "policy": "local_first"
+            },
+            {
+              "stage": "io",
+              "machine": "local",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 1,
+              "local_replicas": 2,
+              "policy": "local_first"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "local",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 2,
+              "policy": "local_first"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "local",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 1,
+              "local_replicas": 2,
+              "policy": "local_first"
+            },
+            {
+              "stage": "collect",
+              "machine": "local",
+              "rank": 0,
+              "replicas": 1,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            }
+          ],
+          "run_options": {
+            "max_payload_bytes": 1060864,
+            "retained_items": 64,
+            "retained_bytes": 67108864,
+            "queue_bytes": 8486912,
+            "output_bytes": 4243456,
+            "capacity": 16,
+            "output_capacity": 4
+          },
+          "state": "completed",
+          "obligations_created": 108,
+          "obligations_settled": 108,
+          "local_items": 96,
+          "remote_items": 0,
+          "local_bytes": 25185888,
+          "remote_bytes": 0,
+          "final_bytes": 0,
+          "agents": {},
+          "peak_queue_items": {
+            "io": 0,
+            "preprocess": 1,
+            "collect": 1
+          },
+          "peak_queue_bytes": {
+            "io": 0,
+            "preprocess": 262283,
+            "collect": 262423
+          },
+          "peak_retained_items": {
+            "local": 9
+          },
+          "peak_retained_bytes": {
+            "local": 4756850
+          },
+          "peak_output_items": 1,
+          "peak_output_bytes": 1049657,
+          "worker_pids": [
+            1603267,
+            1603268,
+            1603269,
+            1603270,
+            1603271
+          ]
+        }
+      ],
+      "median_elapsed_seconds": 1.6233764328062534,
+      "median_items_per_second": 29.568003471027783
+    },
+    {
+      "mode": "local",
+      "policy": "local_first",
+      "io_ranks": 2,
+      "preprocess_ranks": 4,
+      "collect_ranks": 1,
+      "rank_counts": "local totals",
+      "warmups": [
+        {
+          "elapsed_seconds": 1.7183893099427223,
+          "items_per_second": 27.933134664111677,
+          "time_to_first_batch_seconds": 0.3996858529280871,
+          "items": 48,
+          "checksum": "898234e42086af903f5bed913493f652b2358416a92ca710e6949970f05aec6d",
+          "source_items": {
+            "local:0": 24,
+            "local:1": 24
+          },
+          "batch_length_counts": {
+            "4": 12
+          },
+          "service": {
+            "read_seconds": 0.004970823414623737,
+            "read_cpu_seconds": 0.004970357999999994,
+            "preprocess_seconds": 2.54754553665407,
+            "preprocess_cpu_seconds": 2.457980648000001
+          },
+          "placement": [
+            {
+              "stage": "io",
+              "machine": "local",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 2,
+              "policy": "local_first"
+            },
+            {
+              "stage": "io",
+              "machine": "local",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 1,
+              "local_replicas": 2,
+              "policy": "local_first"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "local",
+              "rank": 0,
+              "replicas": 4,
+              "local_rank": 0,
+              "local_replicas": 4,
+              "policy": "local_first"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "local",
+              "rank": 1,
+              "replicas": 4,
+              "local_rank": 1,
+              "local_replicas": 4,
+              "policy": "local_first"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "local",
+              "rank": 2,
+              "replicas": 4,
+              "local_rank": 2,
+              "local_replicas": 4,
+              "policy": "local_first"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "local",
+              "rank": 3,
+              "replicas": 4,
+              "local_rank": 3,
+              "local_replicas": 4,
+              "policy": "local_first"
+            },
+            {
+              "stage": "collect",
+              "machine": "local",
+              "rank": 0,
+              "replicas": 1,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            }
+          ],
+          "run_options": {
+            "max_payload_bytes": 1060864,
+            "retained_items": 64,
+            "retained_bytes": 67108864,
+            "queue_bytes": 8486912,
+            "output_bytes": 4243456,
+            "capacity": 16,
+            "output_capacity": 4
+          },
+          "state": "completed",
+          "obligations_created": 108,
+          "obligations_settled": 108,
+          "local_items": 96,
+          "remote_items": 0,
+          "local_bytes": 25185888,
+          "remote_bytes": 0,
+          "final_bytes": 0,
+          "agents": {},
+          "peak_queue_items": {
+            "io": 0,
+            "preprocess": 1,
+            "collect": 1
+          },
+          "peak_queue_bytes": {
+            "io": 0,
+            "preprocess": 262283,
+            "collect": 262423
+          },
+          "peak_retained_items": {
+            "local": 9
+          },
+          "peak_retained_bytes": {
+            "local": 4756850
+          },
+          "peak_output_items": 1,
+          "peak_output_bytes": 1049657,
+          "worker_pids": [
+            1603285,
+            1603286,
+            1603287,
+            1603288,
+            1603289,
+            1603290,
+            1603291
+          ]
+        }
+      ],
+      "trials": [
+        {
+          "elapsed_seconds": 1.768857971066609,
+          "items_per_second": 27.136152695773724,
+          "time_to_first_batch_seconds": 0.39283407619223,
+          "items": 48,
+          "checksum": "898234e42086af903f5bed913493f652b2358416a92ca710e6949970f05aec6d",
+          "source_items": {
+            "local:0": 24,
+            "local:1": 24
+          },
+          "batch_length_counts": {
+            "4": 12
+          },
+          "service": {
+            "read_seconds": 0.005022225435823202,
+            "read_cpu_seconds": 0.0049701180000000095,
+            "preprocess_seconds": 2.59808814432472,
+            "preprocess_cpu_seconds": 2.5103137630000005
+          },
+          "placement": [
+            {
+              "stage": "io",
+              "machine": "local",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 2,
+              "policy": "local_first"
+            },
+            {
+              "stage": "io",
+              "machine": "local",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 1,
+              "local_replicas": 2,
+              "policy": "local_first"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "local",
+              "rank": 0,
+              "replicas": 4,
+              "local_rank": 0,
+              "local_replicas": 4,
+              "policy": "local_first"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "local",
+              "rank": 1,
+              "replicas": 4,
+              "local_rank": 1,
+              "local_replicas": 4,
+              "policy": "local_first"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "local",
+              "rank": 2,
+              "replicas": 4,
+              "local_rank": 2,
+              "local_replicas": 4,
+              "policy": "local_first"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "local",
+              "rank": 3,
+              "replicas": 4,
+              "local_rank": 3,
+              "local_replicas": 4,
+              "policy": "local_first"
+            },
+            {
+              "stage": "collect",
+              "machine": "local",
+              "rank": 0,
+              "replicas": 1,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            }
+          ],
+          "run_options": {
+            "max_payload_bytes": 1060864,
+            "retained_items": 64,
+            "retained_bytes": 67108864,
+            "queue_bytes": 8486912,
+            "output_bytes": 4243456,
+            "capacity": 16,
+            "output_capacity": 4
+          },
+          "state": "completed",
+          "obligations_created": 108,
+          "obligations_settled": 108,
+          "local_items": 96,
+          "remote_items": 0,
+          "local_bytes": 25185888,
+          "remote_bytes": 0,
+          "final_bytes": 0,
+          "agents": {},
+          "peak_queue_items": {
+            "io": 0,
+            "preprocess": 1,
+            "collect": 1
+          },
+          "peak_queue_bytes": {
+            "io": 0,
+            "preprocess": 262283,
+            "collect": 262423
+          },
+          "peak_retained_items": {
+            "local": 9
+          },
+          "peak_retained_bytes": {
+            "local": 4756850
+          },
+          "peak_output_items": 1,
+          "peak_output_bytes": 1049657,
+          "worker_pids": [
+            1603310,
+            1603311,
+            1603312,
+            1603313,
+            1603314,
+            1603315,
+            1603316
+          ]
+        },
+        {
+          "elapsed_seconds": 1.7909571097698063,
+          "items_per_second": 26.80131184502207,
+          "time_to_first_batch_seconds": 0.42123865196481347,
+          "items": 48,
+          "checksum": "898234e42086af903f5bed913493f652b2358416a92ca710e6949970f05aec6d",
+          "source_items": {
+            "local:0": 24,
+            "local:1": 24
+          },
+          "batch_length_counts": {
+            "4": 12
+          },
+          "service": {
+            "read_seconds": 0.005151874385774136,
+            "read_cpu_seconds": 0.0051497389999999865,
+            "preprocess_seconds": 2.7087835723068565,
+            "preprocess_cpu_seconds": 2.6272680970000004
+          },
+          "placement": [
+            {
+              "stage": "io",
+              "machine": "local",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 2,
+              "policy": "local_first"
+            },
+            {
+              "stage": "io",
+              "machine": "local",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 1,
+              "local_replicas": 2,
+              "policy": "local_first"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "local",
+              "rank": 0,
+              "replicas": 4,
+              "local_rank": 0,
+              "local_replicas": 4,
+              "policy": "local_first"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "local",
+              "rank": 1,
+              "replicas": 4,
+              "local_rank": 1,
+              "local_replicas": 4,
+              "policy": "local_first"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "local",
+              "rank": 2,
+              "replicas": 4,
+              "local_rank": 2,
+              "local_replicas": 4,
+              "policy": "local_first"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "local",
+              "rank": 3,
+              "replicas": 4,
+              "local_rank": 3,
+              "local_replicas": 4,
+              "policy": "local_first"
+            },
+            {
+              "stage": "collect",
+              "machine": "local",
+              "rank": 0,
+              "replicas": 1,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            }
+          ],
+          "run_options": {
+            "max_payload_bytes": 1060864,
+            "retained_items": 64,
+            "retained_bytes": 67108864,
+            "queue_bytes": 8486912,
+            "output_bytes": 4243456,
+            "capacity": 16,
+            "output_capacity": 4
+          },
+          "state": "completed",
+          "obligations_created": 108,
+          "obligations_settled": 108,
+          "local_items": 96,
+          "remote_items": 0,
+          "local_bytes": 25185888,
+          "remote_bytes": 0,
+          "final_bytes": 0,
+          "agents": {},
+          "peak_queue_items": {
+            "io": 0,
+            "preprocess": 1,
+            "collect": 1
+          },
+          "peak_queue_bytes": {
+            "io": 0,
+            "preprocess": 262283,
+            "collect": 262423
+          },
+          "peak_retained_items": {
+            "local": 9
+          },
+          "peak_retained_bytes": {
+            "local": 4756850
+          },
+          "peak_output_items": 1,
+          "peak_output_bytes": 1049657,
+          "worker_pids": [
+            1603358,
+            1603359,
+            1603360,
+            1603361,
+            1603362,
+            1603363,
+            1603364
+          ]
+        },
+        {
+          "elapsed_seconds": 1.8103313411120325,
+          "items_per_second": 26.514483238474472,
+          "time_to_first_batch_seconds": 0.41812052414752543,
+          "items": 48,
+          "checksum": "898234e42086af903f5bed913493f652b2358416a92ca710e6949970f05aec6d",
+          "source_items": {
+            "local:0": 24,
+            "local:1": 24
+          },
+          "batch_length_counts": {
+            "4": 12
+          },
+          "service": {
+            "read_seconds": 0.005026425002142787,
+            "read_cpu_seconds": 0.0050132369999999205,
+            "preprocess_seconds": 2.747543544974178,
+            "preprocess_cpu_seconds": 2.650354247
+          },
+          "placement": [
+            {
+              "stage": "io",
+              "machine": "local",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 2,
+              "policy": "local_first"
+            },
+            {
+              "stage": "io",
+              "machine": "local",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 1,
+              "local_replicas": 2,
+              "policy": "local_first"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "local",
+              "rank": 0,
+              "replicas": 4,
+              "local_rank": 0,
+              "local_replicas": 4,
+              "policy": "local_first"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "local",
+              "rank": 1,
+              "replicas": 4,
+              "local_rank": 1,
+              "local_replicas": 4,
+              "policy": "local_first"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "local",
+              "rank": 2,
+              "replicas": 4,
+              "local_rank": 2,
+              "local_replicas": 4,
+              "policy": "local_first"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "local",
+              "rank": 3,
+              "replicas": 4,
+              "local_rank": 3,
+              "local_replicas": 4,
+              "policy": "local_first"
+            },
+            {
+              "stage": "collect",
+              "machine": "local",
+              "rank": 0,
+              "replicas": 1,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            }
+          ],
+          "run_options": {
+            "max_payload_bytes": 1060864,
+            "retained_items": 64,
+            "retained_bytes": 67108864,
+            "queue_bytes": 8486912,
+            "output_bytes": 4243456,
+            "capacity": 16,
+            "output_capacity": 4
+          },
+          "state": "completed",
+          "obligations_created": 108,
+          "obligations_settled": 108,
+          "local_items": 96,
+          "remote_items": 0,
+          "local_bytes": 25185888,
+          "remote_bytes": 0,
+          "final_bytes": 0,
+          "agents": {},
+          "peak_queue_items": {
+            "io": 0,
+            "preprocess": 1,
+            "collect": 1
+          },
+          "peak_queue_bytes": {
+            "io": 0,
+            "preprocess": 262283,
+            "collect": 262423
+          },
+          "peak_retained_items": {
+            "local": 10
+          },
+          "peak_retained_bytes": {
+            "local": 5019273
+          },
+          "peak_output_items": 1,
+          "peak_output_bytes": 1049657,
+          "worker_pids": [
+            1603382,
+            1603383,
+            1603384,
+            1603385,
+            1603386,
+            1603387,
+            1603388
+          ]
+        }
+      ],
+      "median_elapsed_seconds": 1.7909571097698063,
+      "median_items_per_second": 26.80131184502207
+    },
+    {
+      "mode": "agents",
+      "policy": "local_first",
+      "io_ranks": 1,
+      "preprocess_ranks": 1,
+      "collect_ranks": 1,
+      "rank_counts": "per machine",
+      "warmups": [
+        {
+          "elapsed_seconds": 1.820313662989065,
+          "items_per_second": 26.3690818653644,
+          "time_to_first_batch_seconds": 0.43057996197603643,
+          "items": 48,
+          "checksum": "898234e42086af903f5bed913493f652b2358416a92ca710e6949970f05aec6d",
+          "source_items": {
+            "b:1": 24,
+            "a:0": 24
+          },
+          "batch_length_counts": {
+            "4": 12
+          },
+          "service": {
+            "read_seconds": 0.005085929296910763,
+            "read_cpu_seconds": 0.005099367000000007,
+            "preprocess_seconds": 2.8687872600276023,
+            "preprocess_cpu_seconds": 2.7850944859999993
+          },
+          "placement": [
+            {
+              "stage": "io",
+              "machine": "a",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            },
+            {
+              "stage": "io",
+              "machine": "b",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "a",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "b",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            },
+            {
+              "stage": "collect",
+              "machine": "a",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            },
+            {
+              "stage": "collect",
+              "machine": "b",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            }
+          ],
+          "run_options": {
+            "max_payload_bytes": 1060864,
+            "retained_items": 64,
+            "retained_bytes": 67108864,
+            "queue_bytes": 8486912,
+            "output_bytes": 4243456,
+            "capacity": 16,
+            "output_capacity": 4
+          },
+          "state": "completed",
+          "obligations_created": 108,
+          "obligations_settled": 108,
+          "local_items": 96,
+          "remote_items": 0,
+          "local_bytes": 25185504,
+          "remote_bytes": 0,
+          "final_bytes": 12595620,
+          "agents": {
+            "b": {
+              "type": "stopped",
+              "run": "4ff4efca376048379ccb35cafbb1405b",
+              "transfers": {
+                "local_items": 48,
+                "local_bytes": 12592752,
+                "remote_items": 0,
+                "remote_bytes": 0,
+                "served_remote_bytes": 0,
+                "final_bytes": 6297810
+              },
+              "retained_items": 0,
+              "retained_bytes": 0,
+              "peak_retained_bytes": 2361590,
+              "peak_retained_items": 6
+            },
+            "a": {
+              "type": "stopped",
+              "run": "4ff4efca376048379ccb35cafbb1405b",
+              "transfers": {
+                "local_items": 48,
+                "local_bytes": 12592752,
+                "remote_items": 0,
+                "remote_bytes": 0,
+                "served_remote_bytes": 0,
+                "final_bytes": 6297810
+              },
+              "retained_items": 0,
+              "retained_bytes": 0,
+              "peak_retained_bytes": 2361590,
+              "peak_retained_items": 6
+            }
+          },
+          "peak_queue_items": {
+            "io": 0,
+            "preprocess": 1,
+            "collect": 1
+          },
+          "peak_queue_bytes": {
+            "io": 0,
+            "preprocess": 262279,
+            "collect": 262419
+          },
+          "peak_retained_items": {
+            "a": 7,
+            "b": 7
+          },
+          "peak_retained_bytes": {
+            "a": 3433683,
+            "b": 3433683
+          },
+          "peak_output_items": 1,
+          "peak_output_bytes": 1049635,
+          "worker_pids": [
+            1603411,
+            1603412,
+            1603415,
+            1603410,
+            1603413,
+            1603414
+          ]
+        }
+      ],
+      "trials": [
+        {
+          "elapsed_seconds": 1.6311649379786104,
+          "items_per_second": 29.426821826787837,
+          "time_to_first_batch_seconds": 0.3849171339534223,
+          "items": 48,
+          "checksum": "898234e42086af903f5bed913493f652b2358416a92ca710e6949970f05aec6d",
+          "source_items": {
+            "a:0": 24,
+            "b:1": 24
+          },
+          "batch_length_counts": {
+            "4": 12
+          },
+          "service": {
+            "read_seconds": 0.0050251679494977,
+            "read_cpu_seconds": 0.00501434500000001,
+            "preprocess_seconds": 2.5655528446659446,
+            "preprocess_cpu_seconds": 2.495036563
+          },
+          "placement": [
+            {
+              "stage": "io",
+              "machine": "a",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            },
+            {
+              "stage": "io",
+              "machine": "b",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "a",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "b",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            },
+            {
+              "stage": "collect",
+              "machine": "a",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            },
+            {
+              "stage": "collect",
+              "machine": "b",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            }
+          ],
+          "run_options": {
+            "max_payload_bytes": 1060864,
+            "retained_items": 64,
+            "retained_bytes": 67108864,
+            "queue_bytes": 8486912,
+            "output_bytes": 4243456,
+            "capacity": 16,
+            "output_capacity": 4
+          },
+          "state": "completed",
+          "obligations_created": 108,
+          "obligations_settled": 108,
+          "local_items": 96,
+          "remote_items": 0,
+          "local_bytes": 25185504,
+          "remote_bytes": 0,
+          "final_bytes": 12595620,
+          "agents": {
+            "a": {
+              "type": "stopped",
+              "run": "48622482cb3d407b8aed0fa4ebc0aad0",
+              "transfers": {
+                "local_items": 48,
+                "local_bytes": 12592752,
+                "remote_items": 0,
+                "remote_bytes": 0,
+                "served_remote_bytes": 0,
+                "final_bytes": 6297810
+              },
+              "retained_items": 0,
+              "retained_bytes": 0,
+              "peak_retained_bytes": 2361590,
+              "peak_retained_items": 6
+            },
+            "b": {
+              "type": "stopped",
+              "run": "48622482cb3d407b8aed0fa4ebc0aad0",
+              "transfers": {
+                "local_items": 48,
+                "local_bytes": 12592752,
+                "remote_items": 0,
+                "remote_bytes": 0,
+                "served_remote_bytes": 0,
+                "final_bytes": 6297810
+              },
+              "retained_items": 0,
+              "retained_bytes": 0,
+              "peak_retained_bytes": 2361590,
+              "peak_retained_items": 6
+            }
+          },
+          "peak_queue_items": {
+            "io": 0,
+            "preprocess": 1,
+            "collect": 1
+          },
+          "peak_queue_bytes": {
+            "io": 0,
+            "preprocess": 262279,
+            "collect": 262419
+          },
+          "peak_retained_items": {
+            "a": 7,
+            "b": 7
+          },
+          "peak_retained_bytes": {
+            "a": 3433683,
+            "b": 3433683
+          },
+          "peak_output_items": 1,
+          "peak_output_bytes": 1049635,
+          "worker_pids": [
+            1603444,
+            1603447,
+            1603448,
+            1603445,
+            1603446,
+            1603449
+          ]
+        },
+        {
+          "elapsed_seconds": 1.642863136017695,
+          "items_per_second": 29.217284719378473,
+          "time_to_first_batch_seconds": 0.3759451259393245,
+          "items": 48,
+          "checksum": "898234e42086af903f5bed913493f652b2358416a92ca710e6949970f05aec6d",
+          "source_items": {
+            "b:1": 24,
+            "a:0": 24
+          },
+          "batch_length_counts": {
+            "4": 11,
+            "1": 1,
+            "3": 1
+          },
+          "service": {
+            "read_seconds": 0.005231497809290886,
+            "read_cpu_seconds": 0.005227611999999965,
+            "preprocess_seconds": 2.5543792962562293,
+            "preprocess_cpu_seconds": 2.460093264
+          },
+          "placement": [
+            {
+              "stage": "io",
+              "machine": "a",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            },
+            {
+              "stage": "io",
+              "machine": "b",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "a",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "b",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            },
+            {
+              "stage": "collect",
+              "machine": "a",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            },
+            {
+              "stage": "collect",
+              "machine": "b",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            }
+          ],
+          "run_options": {
+            "max_payload_bytes": 1060864,
+            "retained_items": 64,
+            "retained_bytes": 67108864,
+            "queue_bytes": 8486912,
+            "output_bytes": 4243456,
+            "capacity": 16,
+            "output_capacity": 4
+          },
+          "state": "completed",
+          "obligations_created": 109,
+          "obligations_settled": 109,
+          "local_items": 95,
+          "remote_items": 1,
+          "local_bytes": 24923085,
+          "remote_bytes": 262419,
+          "final_bytes": 12595640,
+          "agents": {
+            "a": {
+              "type": "stopped",
+              "run": "9780ebd1ed574f41ba71311bca905bb0",
+              "transfers": {
+                "local_items": 48,
+                "local_bytes": 12592752,
+                "remote_items": 1,
+                "remote_bytes": 262419,
+                "served_remote_bytes": 0,
+                "final_bytes": 6560234
+              },
+              "retained_items": 0,
+              "retained_bytes": 0,
+              "peak_retained_bytes": 2361590,
+              "peak_retained_items": 6
+            },
+            "b": {
+              "type": "stopped",
+              "run": "9780ebd1ed574f41ba71311bca905bb0",
+              "transfers": {
+                "local_items": 47,
+                "local_bytes": 12330333,
+                "remote_items": 0,
+                "remote_bytes": 0,
+                "served_remote_bytes": 262419,
+                "final_bytes": 6035406
+              },
+              "retained_items": 0,
+              "retained_bytes": 0,
+              "peak_retained_bytes": 2361590,
+              "peak_retained_items": 6
+            }
+          },
+          "peak_queue_items": {
+            "io": 0,
+            "preprocess": 1,
+            "collect": 1
+          },
+          "peak_queue_bytes": {
+            "io": 0,
+            "preprocess": 262279,
+            "collect": 262419
+          },
+          "peak_retained_items": {
+            "a": 7,
+            "b": 7
+          },
+          "peak_retained_bytes": {
+            "a": 3433683,
+            "b": 3433683
+          },
+          "peak_output_items": 2,
+          "peak_output_bytes": 1049653,
+          "worker_pids": [
+            1603473,
+            1603476,
+            1603477,
+            1603474,
+            1603475,
+            1603478
+          ]
+        },
+        {
+          "elapsed_seconds": 1.6458266680128872,
+          "items_per_second": 29.164675073562574,
+          "time_to_first_batch_seconds": 0.38442388409748673,
+          "items": 48,
+          "checksum": "898234e42086af903f5bed913493f652b2358416a92ca710e6949970f05aec6d",
+          "source_items": {
+            "a:0": 24,
+            "b:1": 24
+          },
+          "batch_length_counts": {
+            "4": 11,
+            "1": 1,
+            "3": 1
+          },
+          "service": {
+            "read_seconds": 0.00547085958532989,
+            "read_cpu_seconds": 0.005348688999999983,
+            "preprocess_seconds": 2.542801372241229,
+            "preprocess_cpu_seconds": 2.457332396999999
+          },
+          "placement": [
+            {
+              "stage": "io",
+              "machine": "a",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            },
+            {
+              "stage": "io",
+              "machine": "b",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "a",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "b",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            },
+            {
+              "stage": "collect",
+              "machine": "a",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            },
+            {
+              "stage": "collect",
+              "machine": "b",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "local_first"
+            }
+          ],
+          "run_options": {
+            "max_payload_bytes": 1060864,
+            "retained_items": 64,
+            "retained_bytes": 67108864,
+            "queue_bytes": 8486912,
+            "output_bytes": 4243456,
+            "capacity": 16,
+            "output_capacity": 4
+          },
+          "state": "completed",
+          "obligations_created": 109,
+          "obligations_settled": 109,
+          "local_items": 95,
+          "remote_items": 1,
+          "local_bytes": 24923085,
+          "remote_bytes": 262419,
+          "final_bytes": 12595640,
+          "agents": {
+            "a": {
+              "type": "stopped",
+              "run": "21b60e653639408d9921721a84bf0cb2",
+              "transfers": {
+                "local_items": 47,
+                "local_bytes": 12330333,
+                "remote_items": 0,
+                "remote_bytes": 0,
+                "served_remote_bytes": 262419,
+                "final_bytes": 6035406
+              },
+              "retained_items": 0,
+              "retained_bytes": 0,
+              "peak_retained_bytes": 2361590,
+              "peak_retained_items": 6
+            },
+            "b": {
+              "type": "stopped",
+              "run": "21b60e653639408d9921721a84bf0cb2",
+              "transfers": {
+                "local_items": 48,
+                "local_bytes": 12592752,
+                "remote_items": 1,
+                "remote_bytes": 262419,
+                "served_remote_bytes": 0,
+                "final_bytes": 6560234
+              },
+              "retained_items": 0,
+              "retained_bytes": 0,
+              "peak_retained_bytes": 2361590,
+              "peak_retained_items": 6
+            }
+          },
+          "peak_queue_items": {
+            "io": 0,
+            "preprocess": 1,
+            "collect": 1
+          },
+          "peak_queue_bytes": {
+            "io": 0,
+            "preprocess": 262279,
+            "collect": 262419
+          },
+          "peak_retained_items": {
+            "a": 7,
+            "b": 7
+          },
+          "peak_retained_bytes": {
+            "a": 3433683,
+            "b": 3433683
+          },
+          "peak_output_items": 1,
+          "peak_output_bytes": 1049637,
+          "worker_pids": [
+            1603502,
+            1603503,
+            1603505,
+            1603501,
+            1603504,
+            1603506
+          ]
+        }
+      ],
+      "median_elapsed_seconds": 1.642863136017695,
+      "median_items_per_second": 29.217284719378473
+    },
+    {
+      "mode": "agents",
+      "policy": "balanced",
+      "io_ranks": 1,
+      "preprocess_ranks": 1,
+      "collect_ranks": 1,
+      "rank_counts": "per machine",
+      "warmups": [
+        {
+          "elapsed_seconds": 1.6421375018544495,
+          "items_per_second": 29.230195367802075,
+          "time_to_first_batch_seconds": 0.3012506349477917,
+          "items": 48,
+          "checksum": "898234e42086af903f5bed913493f652b2358416a92ca710e6949970f05aec6d",
+          "source_items": {
+            "b:1": 24,
+            "a:0": 24
+          },
+          "batch_length_counts": {
+            "4": 11,
+            "1": 1,
+            "3": 1
+          },
+          "service": {
+            "read_seconds": 0.005031567998230457,
+            "read_cpu_seconds": 0.005017359000000013,
+            "preprocess_seconds": 2.57811257452704,
+            "preprocess_cpu_seconds": 2.473602478
+          },
+          "placement": [
+            {
+              "stage": "io",
+              "machine": "a",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "balanced"
+            },
+            {
+              "stage": "io",
+              "machine": "b",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "balanced"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "a",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "balanced"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "b",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "balanced"
+            },
+            {
+              "stage": "collect",
+              "machine": "a",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "balanced"
+            },
+            {
+              "stage": "collect",
+              "machine": "b",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "balanced"
+            }
+          ],
+          "run_options": {
+            "max_payload_bytes": 1060864,
+            "retained_items": 64,
+            "retained_bytes": 67108864,
+            "queue_bytes": 8486912,
+            "output_bytes": 4243456,
+            "capacity": 16,
+            "output_capacity": 4
+          },
+          "state": "completed",
+          "obligations_created": 109,
+          "obligations_settled": 109,
+          "local_items": 71,
+          "remote_items": 25,
+          "local_bytes": 18625029,
+          "remote_bytes": 6560475,
+          "final_bytes": 12595662,
+          "agents": {
+            "a": {
+              "type": "stopped",
+              "run": "c3735622ccb6405d808c9175d0384661",
+              "transfers": {
+                "local_items": 44,
+                "local_bytes": 11543076,
+                "remote_items": 21,
+                "remote_bytes": 5510799,
+                "served_remote_bytes": 1049676,
+                "final_bytes": 10758792
+              },
+              "retained_items": 0,
+              "retained_bytes": 0,
+              "peak_retained_bytes": 2361592,
+              "peak_retained_items": 6
+            },
+            "b": {
+              "type": "stopped",
+              "run": "c3735622ccb6405d808c9175d0384661",
+              "transfers": {
+                "local_items": 27,
+                "local_bytes": 7081953,
+                "remote_items": 4,
+                "remote_bytes": 1049676,
+                "served_remote_bytes": 5510799,
+                "final_bytes": 1836870
+              },
+              "retained_items": 0,
+              "retained_bytes": 0,
+              "peak_retained_bytes": 2099173,
+              "peak_retained_items": 5
+            }
+          },
+          "peak_queue_items": {
+            "io": 0,
+            "preprocess": 1,
+            "collect": 1
+          },
+          "peak_queue_bytes": {
+            "io": 0,
+            "preprocess": 262279,
+            "collect": 262419
+          },
+          "peak_retained_items": {
+            "a": 7,
+            "b": 6
+          },
+          "peak_retained_bytes": {
+            "a": 3433683,
+            "b": 3171264
+          },
+          "peak_output_items": 1,
+          "peak_output_bytes": 1049637,
+          "worker_pids": [
+            1603529,
+            1603530,
+            1603533,
+            1603528,
+            1603531,
+            1603532
+          ]
+        }
+      ],
+      "trials": [
+        {
+          "elapsed_seconds": 1.7755523771047592,
+          "items_per_second": 27.033840634016936,
+          "time_to_first_batch_seconds": 0.29895514994859695,
+          "items": 48,
+          "checksum": "898234e42086af903f5bed913493f652b2358416a92ca710e6949970f05aec6d",
+          "source_items": {
+            "a:0": 24,
+            "b:1": 24
+          },
+          "batch_length_counts": {
+            "4": 11,
+            "1": 1,
+            "3": 1
+          },
+          "service": {
+            "read_seconds": 0.005327110877260566,
+            "read_cpu_seconds": 0.005264993999999981,
+            "preprocess_seconds": 2.865681541385129,
+            "preprocess_cpu_seconds": 2.7268025729999996
+          },
+          "placement": [
+            {
+              "stage": "io",
+              "machine": "a",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "balanced"
+            },
+            {
+              "stage": "io",
+              "machine": "b",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "balanced"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "a",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "balanced"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "b",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "balanced"
+            },
+            {
+              "stage": "collect",
+              "machine": "a",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "balanced"
+            },
+            {
+              "stage": "collect",
+              "machine": "b",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "balanced"
+            }
+          ],
+          "run_options": {
+            "max_payload_bytes": 1060864,
+            "retained_items": 64,
+            "retained_bytes": 67108864,
+            "queue_bytes": 8486912,
+            "output_bytes": 4243456,
+            "capacity": 16,
+            "output_capacity": 4
+          },
+          "state": "completed",
+          "obligations_created": 109,
+          "obligations_settled": 109,
+          "local_items": 71,
+          "remote_items": 25,
+          "local_bytes": 18625029,
+          "remote_bytes": 6560475,
+          "final_bytes": 12595662,
+          "agents": {
+            "a": {
+              "type": "stopped",
+              "run": "3423644cbff04f29920be229333c6651",
+              "transfers": {
+                "local_items": 45,
+                "local_bytes": 11805495,
+                "remote_items": 22,
+                "remote_bytes": 5773218,
+                "served_remote_bytes": 787257,
+                "final_bytes": 11283603
+              },
+              "retained_items": 0,
+              "retained_bytes": 0,
+              "peak_retained_bytes": 2099173,
+              "peak_retained_items": 5
+            },
+            "b": {
+              "type": "stopped",
+              "run": "3423644cbff04f29920be229333c6651",
+              "transfers": {
+                "local_items": 26,
+                "local_bytes": 6819534,
+                "remote_items": 3,
+                "remote_bytes": 787257,
+                "served_remote_bytes": 5773218,
+                "final_bytes": 1312059
+              },
+              "retained_items": 0,
+              "retained_bytes": 0,
+              "peak_retained_bytes": 1836754,
+              "peak_retained_items": 5
+            }
+          },
+          "peak_queue_items": {
+            "io": 0,
+            "preprocess": 1,
+            "collect": 1
+          },
+          "peak_queue_bytes": {
+            "io": 0,
+            "preprocess": 262279,
+            "collect": 262419
+          },
+          "peak_retained_items": {
+            "a": 6,
+            "b": 6
+          },
+          "peak_retained_bytes": {
+            "a": 3171264,
+            "b": 2908845
+          },
+          "peak_output_items": 1,
+          "peak_output_bytes": 1049637,
+          "worker_pids": [
+            1603555,
+            1603556,
+            1603559,
+            1603557,
+            1603558,
+            1603560
+          ]
+        },
+        {
+          "elapsed_seconds": 1.966799657791853,
+          "items_per_second": 24.40512932257173,
+          "time_to_first_batch_seconds": 0.3539202339015901,
+          "items": 48,
+          "checksum": "898234e42086af903f5bed913493f652b2358416a92ca710e6949970f05aec6d",
+          "source_items": {
+            "b:1": 24,
+            "a:0": 24
+          },
+          "batch_length_counts": {
+            "4": 11,
+            "2": 2
+          },
+          "service": {
+            "read_seconds": 0.00585293211042881,
+            "read_cpu_seconds": 0.0058119080000000045,
+            "preprocess_seconds": 2.896117229014635,
+            "preprocess_cpu_seconds": 2.428137908
+          },
+          "placement": [
+            {
+              "stage": "io",
+              "machine": "a",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "balanced"
+            },
+            {
+              "stage": "io",
+              "machine": "b",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "balanced"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "a",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "balanced"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "b",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "balanced"
+            },
+            {
+              "stage": "collect",
+              "machine": "a",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "balanced"
+            },
+            {
+              "stage": "collect",
+              "machine": "b",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "balanced"
+            }
+          ],
+          "run_options": {
+            "max_payload_bytes": 1060864,
+            "retained_items": 64,
+            "retained_bytes": 67108864,
+            "queue_bytes": 8486912,
+            "output_bytes": 4243456,
+            "capacity": 16,
+            "output_capacity": 4
+          },
+          "state": "completed",
+          "obligations_created": 109,
+          "obligations_settled": 109,
+          "local_items": 72,
+          "remote_items": 24,
+          "local_bytes": 18887868,
+          "remote_bytes": 6297636,
+          "final_bytes": 12595661,
+          "agents": {
+            "a": {
+              "type": "stopped",
+              "run": "2aaa683179374073bc037ccdafde04f4",
+              "transfers": {
+                "local_items": 46,
+                "local_bytes": 12067914,
+                "remote_items": 19,
+                "remote_bytes": 4985541,
+                "served_remote_bytes": 1312095,
+                "final_bytes": 9971560
+              },
+              "retained_items": 0,
+              "retained_bytes": 0,
+              "peak_retained_bytes": 2886430,
+              "peak_retained_items": 8
+            },
+            "b": {
+              "type": "stopped",
+              "run": "2aaa683179374073bc037ccdafde04f4",
+              "transfers": {
+                "local_items": 26,
+                "local_bytes": 6819954,
+                "remote_items": 5,
+                "remote_bytes": 1312095,
+                "served_remote_bytes": 4985541,
+                "final_bytes": 2624101
+              },
+              "retained_items": 0,
+              "retained_bytes": 0,
+              "peak_retained_bytes": 2099173,
+              "peak_retained_items": 5
+            }
+          },
+          "peak_queue_items": {
+            "io": 0,
+            "preprocess": 1,
+            "collect": 1
+          },
+          "peak_queue_bytes": {
+            "io": 0,
+            "preprocess": 262279,
+            "collect": 262419
+          },
+          "peak_retained_items": {
+            "a": 9,
+            "b": 6
+          },
+          "peak_retained_bytes": {
+            "a": 3958521,
+            "b": 3171264
+          },
+          "peak_output_items": 2,
+          "peak_output_bytes": 1049654,
+          "worker_pids": [
+            1603584,
+            1603586,
+            1603588,
+            1603583,
+            1603585,
+            1603587
+          ]
+        },
+        {
+          "elapsed_seconds": 1.6391873608808964,
+          "items_per_second": 29.28280265302002,
+          "time_to_first_batch_seconds": 0.28745597787201405,
+          "items": 48,
+          "checksum": "898234e42086af903f5bed913493f652b2358416a92ca710e6949970f05aec6d",
+          "source_items": {
+            "b:1": 24,
+            "a:0": 24
+          },
+          "batch_length_counts": {
+            "4": 11,
+            "1": 1,
+            "3": 1
+          },
+          "service": {
+            "read_seconds": 0.005142413312569261,
+            "read_cpu_seconds": 0.005124559000000015,
+            "preprocess_seconds": 2.574385864427313,
+            "preprocess_cpu_seconds": 2.488792086
+          },
+          "placement": [
+            {
+              "stage": "io",
+              "machine": "a",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "balanced"
+            },
+            {
+              "stage": "io",
+              "machine": "b",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "balanced"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "a",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "balanced"
+            },
+            {
+              "stage": "preprocess",
+              "machine": "b",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "balanced"
+            },
+            {
+              "stage": "collect",
+              "machine": "a",
+              "rank": 0,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "balanced"
+            },
+            {
+              "stage": "collect",
+              "machine": "b",
+              "rank": 1,
+              "replicas": 2,
+              "local_rank": 0,
+              "local_replicas": 1,
+              "policy": "balanced"
+            }
+          ],
+          "run_options": {
+            "max_payload_bytes": 1060864,
+            "retained_items": 64,
+            "retained_bytes": 67108864,
+            "queue_bytes": 8486912,
+            "output_bytes": 4243456,
+            "capacity": 16,
+            "output_capacity": 4
+          },
+          "state": "completed",
+          "obligations_created": 109,
+          "obligations_settled": 109,
+          "local_items": 21,
+          "remote_items": 75,
+          "local_bytes": 5510799,
+          "remote_bytes": 19674705,
+          "final_bytes": 12595662,
+          "agents": {
+            "a": {
+              "type": "stopped",
+              "run": "fd57daeb04944b628e96328bd5e7e9e4",
+              "transfers": {
+                "local_items": 20,
+                "local_bytes": 5248380,
+                "remote_items": 47,
+                "remote_bytes": 12330333,
+                "served_remote_bytes": 7344372,
+                "final_bytes": 11283603
+              },
+              "retained_items": 0,
+              "retained_bytes": 0,
+              "peak_retained_bytes": 2361592,
+              "peak_retained_items": 6
+            },
+            "b": {
+              "type": "stopped",
+              "run": "fd57daeb04944b628e96328bd5e7e9e4",
+              "transfers": {
+                "local_items": 1,
+                "local_bytes": 262419,
+                "remote_items": 28,
+                "remote_bytes": 7344372,
+                "served_remote_bytes": 12330333,
+                "final_bytes": 1312059
+              },
+              "retained_items": 0,
+              "retained_bytes": 0,
+              "peak_retained_bytes": 1574335,
+              "peak_retained_items": 4
+            }
+          },
+          "peak_queue_items": {
+            "io": 0,
+            "preprocess": 1,
+            "collect": 1
+          },
+          "peak_queue_bytes": {
+            "io": 0,
+            "preprocess": 262279,
+            "collect": 262419
+          },
+          "peak_retained_items": {
+            "a": 7,
+            "b": 5
+          },
+          "peak_retained_bytes": {
+            "a": 4232268,
+            "b": 3445011
+          },
+          "peak_output_items": 2,
+          "peak_output_bytes": 1049655,
+          "worker_pids": [
+            1603652,
+            1603654,
+            1603657,
+            1603653,
+            1603655,
+            1603656
+          ]
+        }
+      ],
+      "median_elapsed_seconds": 1.7755523771047592,
+      "median_items_per_second": 27.033840634016936
+    }
+  ],
+  "timing_scope": "worker initialization, file IO, CPU preprocessing, serialization, collection, verification and cleanup; excludes fixture generation, expected digest computation and agent startup"
+}
