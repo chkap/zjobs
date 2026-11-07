@@ -55,11 +55,15 @@ def serve(
             last_heartbeat = 0.0
             group: dict[bytes, _Worker] = {}
             payloads: dict[str, bytes] = {}
+            payload_workers: dict[str, bytes] = {}
+            accepted: set[str] = set()
             sequence = 0
             peers: dict[str, zmq.Socket] = {}
             fetching: dict[bytes, str] = {}
             byte_limit = 0
             item_limit = 0
+            payload_limit = 0
+            retired: set[bytes] = set()
             retained_size = 0
             peak_retained_size = 0
             peak_retained_items = 0
@@ -79,7 +83,10 @@ def serve(
                 stop_processes([worker.process for worker in group.values()])
                 group = {}
                 payloads.clear()
+                payload_workers.clear()
+                accepted.clear()
                 fetching.clear()
+                retired.clear()
                 retained_size = 0
                 peak_retained_size = peak_retained_items = 0
                 for peer in peers.values():
@@ -130,6 +137,7 @@ def serve(
                                 owner, run = recipient, message["run"]
                                 byte_limit = message["retained_bytes"]
                                 item_limit = message["retained_items"]
+                                payload_limit = message["payload_limit"]
                                 for peer_machine, endpoint in message["peers"].items():
                                     if peer_machine == machine:
                                         continue
@@ -200,7 +208,45 @@ def serve(
                                     workers.send_multipart([identity, frames[2], frames[3]])
                             elif kind == "release":
                                 payload = payloads.pop(message["output"])
+                                payload_workers.pop(message["output"])
+                                accepted.discard(message["output"])
                                 retained_size -= len(payload)
+                            elif kind == "accept":
+                                if message["output"] not in payloads:
+                                    raise ValueError("cannot acknowledge unavailable output")
+                                accepted.add(message["output"])
+                            elif kind == "replace":
+                                old = message["old"].encode("ascii")
+                                spec = message["worker"]
+                                identity = spec["identity"].encode("ascii")
+                                if old not in group or identity in group or len(frames) != 3:
+                                    raise ValueError("invalid worker replacement")
+                                retired.add(old)
+                                for output in list(payloads):
+                                    if payload_workers[output] == old and output not in accepted:
+                                        retained_size -= len(payloads.pop(output))
+                                        payload_workers.pop(output)
+                                fetching.pop(old, None)
+                                try:
+                                    workers.send_multipart([old, b"stop", b""], zmq.DONTWAIT)
+                                except zmq.ZMQError:
+                                    pass
+                                previous = group.pop(old).process
+                                if previous.is_alive():
+                                    previous.terminate()
+                                stop_processes([previous])
+                                process = mp.get_context("spawn").Process(
+                                    target=worker_main,
+                                    args=(worker_endpoint, identity, frames[2], spec["source"],
+                                          spec["rank"], spec["replicas"], payload_limit, machine,
+                                          spec["local_rank"], spec["local_replicas"], os.getpid()),
+                                    name=f"zjobs-{spec['stage']}-{spec['rank']}",
+                                )
+                                process.start()
+                                group[identity] = _Worker(process)
+                                last_seen = time.monotonic()
+                                send(recipient, {"type": "replaced", "run": run,
+                                                 "worker": identity.decode(), "pid": process.pid})
                             elif kind == "final":
                                 payload = payloads[message["output"]]
                                 transfers["final_bytes"] += len(payload)
@@ -225,7 +271,10 @@ def serve(
                             if recipient == owner:
                                 cleanup()
                             try:
-                                send(recipient, {"type": "error", "run": failed_run, "error": str(exc)})
+                                error = {"type": "error", "run": failed_run, "error": str(exc)}
+                                if message.get("type") == "fetch":
+                                    error.update(worker=message.get("worker"), output=message.get("output"))
+                                send(recipient, error)
                             except zmq.ZMQError as send_error:
                                 print(f"agent {machine}: cannot report error: {send_error}",
                                       file=sys.stderr, flush=True)
@@ -239,6 +288,7 @@ def serve(
                                     sequence += 1
                                     output = f"{run}:{machine}:{sequence}"
                                     payloads[output] = payload
+                                    payload_workers[output] = identity
                                     retained_size += len(payload)
                                     peak_retained_size = max(peak_retained_size, retained_size)
                                     peak_retained_items = max(peak_retained_items, len(payloads))
@@ -264,6 +314,8 @@ def serve(
                         try:
                             message = decode(frames[0])
                             identity = message.get("worker", "").encode("ascii")
+                            if identity in retired:
+                                continue
                             if (
                                 message.get("type") != "fetched" or message.get("run") != run
                                 or fetching.get(identity) != message.get("output") or len(frames) != 2

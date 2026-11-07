@@ -47,6 +47,7 @@ class Run(Iterator[Any]):
         policy: str = "local_first", retained_items: int = 128,
         retained_bytes: int = 1024 * 1024 * 1024, queue_bytes: int = 256 * 1024 * 1024,
         output_bytes: int = 256 * 1024 * 1024, remote_after: int = 8,
+        max_retries: int = 2, max_worker_restarts: int = 16,
     ) -> None:
         self._nodes = nodes
         self._capacity = capacity
@@ -59,6 +60,8 @@ class Run(Iterator[Any]):
         self._queue_bytes = queue_bytes
         self._output_bytes = output_bytes
         self._remote_after = remote_after
+        self._max_retries = max_retries
+        self._max_worker_restarts = max_worker_restarts
         self._run_id = uuid.uuid4().hex
         self._agents = dict(agents) if agents is not None else None
         if self._agents is not None:
@@ -120,6 +123,8 @@ class Run(Iterator[Any]):
             "obligations_created": 0, "obligations_settled": 0, "obligations_pending": 0,
             "local_items": 0, "local_bytes": 0, "remote_items": 0, "remote_bytes": 0,
             "final_bytes": 0, "peak_output_bytes": 0,
+            "attempts": 0, "retries": 0, "worker_restarts": 0, "stale_results": 0,
+            "retry_errors": [],
         }
         self._definitions = []
         for node in nodes:
