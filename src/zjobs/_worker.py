@@ -53,7 +53,8 @@ def worker_main(
         iterator = None
         socket.send_multipart([b"ready", b""])
         while True:
-            command, payload = socket.recv_multipart()
+            frames = socket.recv_multipart()
+            command, payload = frames[:2]
             if command == b"stop":
                 return
             if command == b"next" and source:
@@ -74,6 +75,9 @@ def worker_main(
                 value = cloudpickle.loads(payload)
                 operation = "execute task"
                 value = task(value)
+            elif command == b"batch" and not source:
+                operation = "deserialize batch members"
+                value = [cloudpickle.loads(member) for member in frames[1:]]
             else:
                 raise RuntimeError(f"unexpected worker command {command!r}")
             operation = "serialize output"

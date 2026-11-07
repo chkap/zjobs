@@ -1,8 +1,8 @@
 # zjobs
 
 A small Python/ZMQ streaming DAG runtime for trusted Python code. **Version
-0.4 supports local processes, static host agents, host-owned locality and
-bounded retained-map replay**.
+0.5 supports local processes, static host agents, host-owned locality,
+bounded replay and independently placed in-graph batching**.
 Independent stage scaling, sharded sources, bounded streaming, fan-out/fan-in,
 and cancellation work today. Machine-based locality
 (`local_first`, `balanced`, `local_only` and their precedence) uses actual
@@ -151,7 +151,7 @@ to a local worker. A remote consumer agent fetches bytes directly from the
 producer agent; intermediate bytes never traverse the controller. Terminal
 outputs alone are fetched by the controller into its bounded final queue.
 Fan-out reuses the producer's serialized buffer, not one stored copy per edge.
-Protocol version 3 / `host-owned-v3` is incompatible with the earlier agents;
+Protocol version 4 / `host-owned-v4` is incompatible with the earlier agents;
 upgrade all participants together.
 
 ## Locality and required delivery
@@ -278,9 +278,88 @@ Sources and map stages execute concurrently, so outputs arrive before sources
 are exhausted. Empty sources finish normally. Completion uses separate control
 frames, never a special Python payload.
 
-`run.batches(size)` batches at the consumer, yields a final partial batch,
-and yields nothing for empty input. This is output collection, not a stateful
-in-graph batching stage. Memory for a batch is additional to runtime buffers.
+`run.batches(size)` still groups final outputs at the consumer, retains a final
+partial group, and yields nothing for empty input. It is separate from
+`Graph.batch` below: wrapping an in-graph batch iterator in `run.batches` creates
+lists of batches, not an implicit flatten. Consumer-side grouping memory is
+additional to runtime buffers.
+
+## Independently placed in-graph batches
+
+```python
+graph = Graph()
+io = graph.source("io", load, placement={"host-a": 2})
+groups = graph.batch("collect", inputs=[io], size=8, max_bytes=8 * 1024 * 1024,
+                     placement={"host-b": 2}, policy="local_first")
+graph.map("consume", lambda batch: [item["value"] for item in batch],
+          inputs=[groups], placement={"host-b": 1})
+with graph.run(agents={"host-a": "tcp://host-a.example:5555",
+                       "host-b": "tcp://host-b.example:5555"}) as run:
+    for batch in run:
+        print(batch)
+```
+
+For a runnable small demo, `python examples/placed_batch.py` launches locally.
+With manually started agents named host-a/host-b, add `--host-a <endpoint>
+--host-b <endpoint>`. This demo validates 23 members across two source ranks,
+two independently placed collection ranks and one downstream rank; it is not
+the later full data-loading/application measurement example.
+
+`graph.batch(name, inputs=[...], size=N, max_bytes=B, replicas=...,
+placement=..., policy=..., rank_policies=...)` emits ordinary **list payloads**
+that downstream maps can consume. Use either local replicas or placement as
+for maps. It is a narrow built-in list primitive, not arbitrary stateful
+accumulation or checkpointing. Members from multiple parents interleave
+without ordering, keyed joins or zip/barrier semantics. Every incoming edge
+member belongs to exactly one group for this batch stage. `None` is a valid
+member, not a completion marker.
+
+Each replica has at most one scheduler-owned partial/active group, at most
+`size` members and `max_bytes` aggregate **serialized member bytes**. A full
+group dispatches immediately. A non-full group also dispatches when the next
+eligible member would exceed its byte bound; an individual member exceeding
+the bound fails explicitly. After all parents complete, every remaining
+nonempty group flushes. Empty input produces no list. With parallel replicas,
+each may emit its own final partial list; **globally maximal batches and a
+single final partial are not promised**. A serialized list can be larger than
+the sum of member frames due to list/type metadata; it must also fit the run's
+`max_payload_bytes` or fails explicitly. Python decoded object size is not
+the serialized byte bound.
+
+Policies select eligible members *before* joining them to the replica's group.
+`local_only` groups contain only payloads available on the chosen machine;
+`local_first` uses ready local members preferentially but may combine owners
+when locality/fair remote selection requests it; `balanced` interleaves admitted
+members without machine preference. Rank > stage > graph precedence and the
+finite remote budget remain fixed at startup. Members are fetched directly
+to the selected collector agent, never through the controller.
+
+The controller retains every member reference and its upstream edge obligation
+while gathering, dispatching and retrying. Only an accepted batch output
+settles **all** member obligations together. Unpublished group crash/stall
+replays the same members on a fresh collector at the same machine/rank; stale
+generations cannot settle them. Accepted batch outputs survive producing-worker
+death without regrouping or re-settling members. A dropped branch, exhausted
+retry, unavailable agent or non-replayable source fails the run, not successful
+completion with missing members. Completion includes no unflushed group,
+active group attempt or required downstream output.
+
+Upstream producers feeding a batch stage may retain multiple outputs so
+`size` can exceed upstream replica count. Each is still covered by machine
+item/byte credits; ordinary map-only paths retain their single-output producer
+credit. **Budget enough retention for gathered members plus reserved output
+overlap**: a group of 8 on one host needs at least 8 retained member slots plus
+an output slot, and enough bytes for members plus `max_payload_bytes`.
+Parallel groups and branches add overlap. Too-small capacity fails finitely
+with stalled required-obligation diagnostics rather than releasing members to
+make room or hanging indefinitely.
+
+`grouping_items` / `grouping_bytes` and their `peak_grouping_*` counters expose
+aggregate member references per stage, bounded by replicas * size/max_bytes.
+These include active/retrying groups; their payload bytes remain in the
+existing retained-store credits. Cancellation/abandonment releases workers,
+partial groups and retained payload stores. Last-active controller snapshots
+may still show pending references after failure for diagnosis.
 
 ## Bounds, lifecycle, and errors
 
