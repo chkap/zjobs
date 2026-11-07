@@ -247,7 +247,7 @@ local/peer traffic measures successful receiver admissions.
 .venv/bin/python examples/measure_peer_graph.py
 ```
 
-This runs a real timed source -> CPU preprocessing -> collection -> local
+This runs a real timed source -> CPU preprocessing -> transform -> collection -> local
 consumer workload with 64 KiB byte payloads. JSON includes actual distinct PIDs,
 accounted buffer peaks, traffic, worker CPU/wall time, execution window and
 summed worker wall/window ratio. A ratio above one proves overlapping reported
@@ -259,9 +259,9 @@ Launch the same measurement entrypoint independently on A/B/C:
 
 ```sh
 PEERS='{"A":"tcp://127.0.0.1:5580","B":"tcp://127.0.0.1:5581","C":"tcp://127.0.0.1:5582"}'
-.venv/bin/python examples/measure_peer_graph.py --identity A --peers "$PEERS" --run-id measure-1 --io-workers 2 --source-delay .005 --cpu-workers 1 --cpu-seconds .03
-.venv/bin/python examples/measure_peer_graph.py --identity B --peers "$PEERS" --run-id measure-1 --io-workers 1 --source-delay .03 --cpu-workers 2 --cpu-seconds .01
-.venv/bin/python examples/measure_peer_graph.py --identity C --peers "$PEERS" --run-id measure-1 --io-workers 1 --source-delay .05 --cpu-workers 2 --cpu-seconds .005
+.venv/bin/python examples/measure_peer_graph.py --identity A --peers "$PEERS" --run-id measure-1 --io-workers 2 --source-delay .005 --cpu-workers 1 --cpu-seconds .03 --transform-delay .002
+.venv/bin/python examples/measure_peer_graph.py --identity B --peers "$PEERS" --run-id measure-1 --io-workers 1 --source-delay .03 --cpu-workers 2 --cpu-seconds .01 --transform-delay .04
+.venv/bin/python examples/measure_peer_graph.py --identity C --peers "$PEERS" --run-id measure-1 --io-workers 1 --source-delay .05 --cpu-workers 2 --cpu-seconds .005 --transform-delay .01
 ```
 
 Run the three commands in separate terminals. Expect 64 unique coordinates in
@@ -282,7 +282,7 @@ done
 ```
 
 Each independent plan reports eight local source replicas (64 across eight
-plans) plus separately configurable CPU/collection counts. `--plan-only` starts
+plans), one transform, plus separately configurable CPU/collection counts. `--plan-only` starts
 no workers or network service. The actual A/B/C resource-bounded launch above
 checks the same configuration/API path without claiming physical eight-host
 execution.

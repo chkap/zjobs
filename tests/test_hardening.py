@@ -53,6 +53,22 @@ def test_missing_claim_response_has_deadline_even_while_renewing(monkeypatch, lo
     clean(run)
 
 
+def test_response_timeout_does_not_apply_to_safely_renewed_active_execution():
+    graph = Graph()
+    root = graph.source("raw", lambda ctx: range(3))
+    def task(value):
+        time.sleep(.25)
+        return value
+    graph.map("map", task, inputs=[root])
+    with graph.run(peer=PeerConfig(claim_timeout=.05, lease_timeout=.12),
+                   limits=Limits(retained_items=1, output_items=1, consumer_timeout=2)) as run:
+        wait_until(lambda: run.status.get("output_items", 0) == 1)
+        time.sleep(.25)
+        assert list(run) == [0, 1, 2]
+    assert run.status["renewals"] > 5
+    clean(run)
+
+
 def test_lost_branch_ack_cannot_complete_and_lease_failure_is_bounded(monkeypatch):
     send = Run._send
     def drop(self, recipient, kind, body, frames=(), *, optional=False):
@@ -183,8 +199,11 @@ def mesh_probe(identity, peers, queue, mode):
         return inp
     def accepted(self, sender, kind, body, frames):
         receive(self, sender, kind, body, frames)
-        if kind == "grant" and body["token"] in pending:
-            admissions.append(pending.pop(body["token"]))
+        if body["token"] in pending:
+            record = pending.pop(body["token"])
+            record["outcome"] = kind
+            if kind == "grant":
+                admissions.append(record)
     def transmit(self, recipient, kind, body, frames=(), *, optional=False):
         if kind == "grant" and body["child"] == "first":
             grants.append({"recipient": recipient, "token": body["token"],
@@ -244,6 +263,7 @@ def test_actual_three_peer_selection_owner_arbitration_and_branch_union(mode):
         assert actual == expected
         assert sum(r["status"]["obligations_created"] for r in rows) == sum(
             r["status"]["obligations_acked"] for r in rows)
+        stable_windows = 0
         for row in rows:
             identity = row["identity"]
             assert row["status"]["stale_messages"] > 0
@@ -261,10 +281,21 @@ def test_actual_three_peer_selection_owner_arbitration_and_branch_union(mode):
                 assert all((v["owner"] == identity) == (v["streak"] < 2) for v in both)
             for owner in peers:
                 assert any(v["owner"] == owner for v in admissions), (identity, owner, admissions)
+            bound = 6 if mode == "local_first" else 3
+            sequence = [v for v in row["selections"]
+                        if v["rank"] == 0 and "outcome" in v]
+            for start in range(len(sequence) - bound + 1):
+                window = sequence[start:start + bound]
+                if all(v.get("outcome") == "grant" and v["eligible"] == sorted(peers)
+                       for v in window):
+                    stable_windows += 1
+                    required = set(peers) - {identity} if mode == "local_first" else set(peers)
+                    assert required.issubset(v["owner"] for v in window), window
         for owner in peers:
             row = next(r for r in rows if r["identity"] == owner)
             assert all(any(g["recipient"] == recipient for g in row["grants"])
                        for recipient in peers)
+        assert stable_windows > 0
         for process in processes:
             process.join(3)
             assert process.exitcode == 0

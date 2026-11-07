@@ -19,6 +19,7 @@ def main():
     parser.add_argument("--payload-bytes", type=int, default=65536)
     parser.add_argument("--source-delay", type=float, default=.01)
     parser.add_argument("--cpu-seconds", type=float, default=.01)
+    parser.add_argument("--transform-delay", type=float, default=.01)
     parser.add_argument("--locality", choices=["local_first", "balanced", "local_only"],
                         default="local_first")
     parser.add_argument("--plan-only", action="store_true")
@@ -36,7 +37,11 @@ def main():
             total += sum(value[3][:1024])
         return value[:3] + (len(value[3]),)
     mapped = graph.map("cpu", preprocess, inputs=[root], replicas=args.cpu_workers)
-    graph.batch("collect", inputs=[mapped], size=8, replicas=args.collect_workers)
+    def transform(value):
+        time.sleep(args.transform_delay)
+        return value
+    transformed = graph.map("transform", transform, inputs=[mapped])
+    graph.batch("collect", inputs=[transformed], size=8, replicas=args.collect_workers)
     peer = PeerConfig(args.identity, args.run_id, args.peers.get(args.identity), args.peers)
     plan = graph.describe(peer=peer)
     if args.plan_only:
