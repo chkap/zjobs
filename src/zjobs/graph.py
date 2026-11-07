@@ -38,6 +38,8 @@ class Node:
     replicas: int
     inputs: tuple[Node, ...]
     placement: tuple[tuple[str, int], ...] = ()
+    policy: str | None = None
+    rank_policies: tuple[tuple[int, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -48,20 +50,32 @@ class ReplicaPlacement:
     replicas: int
     local_rank: int
     local_replicas: int
+    policy: str = "local_first"
+
+
+POLICIES = frozenset(("local_first", "balanced", "local_only"))
+
+
+def validate_policy(policy: str) -> None:
+    if not isinstance(policy, str) or policy not in POLICIES:
+        raise ValueError(f"unknown locality policy {policy!r}; choose local_first, balanced or local_only")
 
 
 class Graph:
     """Build a DAG in topological order; map stages return one output per input."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, policy: str = "local_first") -> None:
+        validate_policy(policy)
+        self._policy = policy
         self._nodes: list[Node] = []
 
     def source(
         self, name: str, task: Callable[..., Any], *, replicas: int = 1,
         placement: Mapping[str, int] | None = None,
+        policy: str | None = None, rank_policies: Mapping[int, str] | None = None,
     ) -> Node:
         """Add a callable(context) -> iterable source, invoked once per replica."""
-        return self._add(name, task, replicas, (), placement)
+        return self._add(name, task, replicas, (), placement, policy, rank_policies)
 
     def map(
         self,
@@ -71,6 +85,7 @@ class Graph:
         inputs: Iterable[Node],
         replicas: int = 1,
         placement: Mapping[str, int] | None = None,
+        policy: str | None = None, rank_policies: Mapping[int, str] | None = None,
     ) -> Node:
         """Add callable(item) -> item; multiple inputs interleave without ordering."""
         parents = tuple(inputs)
@@ -80,11 +95,12 @@ class Graph:
             raise ValueError("duplicate input edges are not allowed")
         if any(parent not in self._nodes for parent in parents):
             raise ValueError("inputs must be existing nodes of this graph")
-        return self._add(name, task, replicas, parents, placement)
+        return self._add(name, task, replicas, parents, placement, policy, rank_policies)
 
     def _add(
         self, name: str, task: Callable[..., Any], replicas: int, inputs: tuple[Node, ...],
         placement: Mapping[str, int] | None,
+        policy: str | None, rank_policies: Mapping[int, str] | None,
     ) -> Node:
         if (
             not isinstance(name, str)
@@ -109,7 +125,14 @@ class Graph:
                     raise ValueError("placement counts must be positive integers")
             hosts = tuple(sorted(placement.items()))
             replicas = sum(count for _, count in hosts)
-        node = Node(name, task, replicas, inputs, hosts)
+        if policy is not None:
+            validate_policy(policy)
+        overrides = dict(rank_policies or {})
+        for rank, value in overrides.items():
+            if isinstance(rank, bool) or not isinstance(rank, int) or not 0 <= rank < replicas:
+                raise ValueError("rank policy indices must be global stage ranks")
+            validate_policy(value)
+        node = Node(name, task, replicas, inputs, hosts, policy, tuple(sorted(overrides.items())))
         self._nodes.append(node)
         return node
 
@@ -123,6 +146,11 @@ class Graph:
         max_payload_bytes: int = 64 * 1024 * 1024,
         agents: Mapping[str, str] | None = None,
         agent_timeout: float = 3.0,
+        retained_items: int = 128,
+        retained_bytes: int = 1024 * 1024 * 1024,
+        queue_bytes: int = 256 * 1024 * 1024,
+        output_bytes: int = 256 * 1024 * 1024,
+        remote_after: int = 8,
     ) -> Run:
         """Launch a snapshot; use the returned iterator as a context manager."""
         from .runtime import Run
@@ -133,9 +161,14 @@ class Graph:
             ("capacity", capacity),
             ("output_capacity", output_capacity),
             ("max_payload_bytes", max_payload_bytes),
+            ("retained_items", retained_items), ("retained_bytes", retained_bytes),
+            ("queue_bytes", queue_bytes), ("output_bytes", output_bytes),
+            ("remote_after", remote_after),
         ):
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise ValueError(f"{name} must be a positive integer")
+        if min(retained_bytes, queue_bytes, output_bytes) < max_payload_bytes:
+            raise ValueError("byte capacities must each fit max_payload_bytes")
         for name, value in (
             ("worker_timeout", worker_timeout), ("consumer_timeout", consumer_timeout),
             ("agent_timeout", agent_timeout),
@@ -150,4 +183,5 @@ class Graph:
         return Run(
             tuple(self._nodes), capacity, output_capacity, worker_timeout,
             consumer_timeout, max_payload_bytes, agents, agent_timeout,
+            self._policy, retained_items, retained_bytes, queue_bytes, output_bytes, remote_after,
         )
