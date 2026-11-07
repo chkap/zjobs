@@ -77,3 +77,18 @@ def test_torch_dataset_context_owns_single_iterator_and_early_cleanup(monkeypatc
         with adapter.LocalGraphDataset(adapter.tensor_graph(8)) as early:
             next(iter(early))
     assert all(s["retained_bytes"] == 0 for s in early.last_status["stages"].values())
+
+
+def test_torch_nested_dataloader_worker_rejects_before_graph_launch():
+    torch = pytest.importorskip("torch")
+    adapter = example("torch_dataset")
+    dataset = adapter.LocalGraphDataset(adapter.tensor_graph(3))
+    loader = torch.utils.data.DataLoader(dataset, num_workers=1, batch_size=None)
+    iterator = iter(loader)
+    try:
+        with pytest.raises(RuntimeError, match="num_workers=0"):
+            next(iterator)
+        assert dataset.stream is None
+    finally:
+        iterator._shutdown_workers()
+    assert all(not worker.is_alive() for worker in iterator._workers)
