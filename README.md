@@ -6,6 +6,12 @@ Peers pull eligible upstream values directly from the producing owner. There
 is no master, worker agent, metadata coordinator, stage broker or global graph.
 Static logical identities describe locality, not proof of separate hardware.
 
+**Guides:** [examples and command matrix](docs/examples.md),
+[architecture and delivery](docs/architecture.md),
+[API and worker resources](docs/api.md),
+[operations and troubleshooting](docs/operations.md).
+These guides describe the shipped peer runtime, not the removed central API.
+
 ## Breaking replacement
 
 Version 1 replaces the previous central runtime. `zjobs-agent`, placement maps,
@@ -268,8 +274,9 @@ Run the three commands in separate terminals. Expect 64 unique coordinates in
 the union of local consumers, every payload length 65536; worker distribution
 is local and timing/consumer ownership are nondeterministic. Repeat with
 `--locality local_only` and a new run ID/ports for application-level comparison.
-Synthetic delays model asymmetric readiness, not real disk throughput; practical
-file IO and optional torch examples remain separate delivery work.
+Synthetic delays model asymmetric readiness, not real disk throughput. For
+practical file preprocessing, branch/union fixture checks, lifecycle examples
+and optional locally owned CPU IterableDataset, see the [examples guide](docs/examples.md).
 
 For an **8 machines x 8 IO ranks** configuration demonstration without pretending
 to launch 64 concurrent workers or requiring eight physical hosts:
@@ -287,10 +294,8 @@ no workers or network service. The actual A/B/C resource-bounded launch above
 checks the same configuration/API path without claiming physical eight-host
 execution.
 
-`tests/test_peer_graph.py` covers standalone streaming, independent peer launches,
-accounting, policies, branches/union, batches, multipart isolation, retries,
-deadlines and cleanup. Task #27 is the replacement foundation, not full goal
-acceptance. #28 extends adversarial delivery/failure/fairness tests; #29 provides
-practical file IO, optional IterableDataset, richer diagnostics/performance
-measurements and additional exercised examples; #30 independently verifies the
-complete goal. Old benchmark results are deliberately removed.
+`tests/test_peer_graph.py` and `tests/test_hardening.py` exercise the replacement
+runtime; `tests/test_examples.py` covers the new example/adapter behavior.
+Foundation/hardening and examples/docs are task-level deliveries, not integrated
+goal acceptance. Independent #30 acceptance is required before goal:v4 PASS.
+Old centralized benchmark results are deliberately removed.
